@@ -1,0 +1,8 @@
+name: otf2amap
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pdfplumber
+  - pypdf
+  - reportlab
