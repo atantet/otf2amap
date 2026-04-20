@@ -2,12 +2,13 @@
 """
 Script pour transformer la première page d'un PDF de ventes de légumes.
 
-Remplace la colonne COMMANDES par des colonnes par type de panier
-(Petit, Moyen, Grand) avec la quantité par panier dans chaque cellule.
-Les lignes "Panier de la semaine" sont supprimées car l'info figure en en-tête.
-Supporte 1 à 3 types de paniers selon la semaine.
+- Titre = date de retrait extraite de la page 2
+- En-tête en gras, sans couleur de fond (noir et blanc)
+- Colonnes : PRODUIT | QUANTITÉ | MONTANT | N PETIT | N MOYEN | N GRAND
+- Lignes "Panier de la semaine" supprimées
+- Page unique au format A5
 
-Usage : python3 transformer_ventes.py Ventes-6.pdf [sortie.pdf]
+Usage : python3 otf2map entree.pdf [sortie.pdf]
 """
 
 import sys
@@ -19,23 +20,23 @@ from collections import defaultdict
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from reportlab.lib.colors import Color
+from reportlab.lib.pagesizes import A5
+from reportlab.lib.colors import Color, black, white
 
-# ── Couleurs ─────────────────────────────────────────────────────────────────
-DARK      = Color(0.1294, 0.1451, 0.1608)
-WHITE     = Color(1.0, 1.0, 1.0)
-HEADER_BG = Color(0.2667, 0.2667, 0.4157)
-ROW_LIGHT = Color(0.9882, 0.9882, 0.9961)
-ROW_DARK  = Color(0.9608, 0.9608, 0.9686)
-SEP       = Color(0.80, 0.80, 0.84)
-SEP_HDR   = Color(0.45, 0.45, 0.60)
+# ── Couleurs ──────────────────────────────────────────────────────────────────
+BLACK     = Color(0, 0, 0)
+WHITE     = Color(1, 1, 1)
+ROW_LIGHT = Color(0.94, 0.94, 0.94)   # gris très clair pour lignes paires
+ROW_DARK  = Color(0.87, 0.87, 0.87)   # gris un peu plus foncé pour lignes impaires
+SEP       = Color(0.65, 0.65, 0.65)
 
-PAGE_W     = 594.96
-PAGE_H     = 841.92
-MARGIN     = 14.25
-PAGE_RIGHT = 581.25
-FONT       = "Helvetica"
-FONT_BOLD  = "Helvetica-Bold"
+# ── Format A5 (points) ────────────────────────────────────────────────────────
+PAGE_W, PAGE_H = A5          # 419.53 x 595.28
+MARGIN     = 10.0
+PAGE_RIGHT = PAGE_W - MARGIN
+
+FONT      = "Helvetica"
+FONT_BOLD = "Helvetica-Bold"
 
 
 def clean(s):
@@ -48,9 +49,20 @@ def fmt(val):
     return f"{val:.2f}".rstrip('0').rstrip('.')
 
 
+def extract_date_from_page2(pdf_path):
+    """Extrait la date de retrait depuis la page 2."""
+    with pdfplumber.open(pdf_path) as pdf:
+        if len(pdf.pages) < 2:
+            return None
+        text = pdf.pages[1].extract_text() or ''
+    # Cherche un motif DD/MM/YYYY
+    m = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', text)
+    return m.group(1) if m else None
+
+
 def extract_table_data(pdf_path):
     """
-    Extrait les données de la page 1 en reconstruisant les lignes du tableau.
+    Extrait les données de la page 1.
     Retourne (rows, paniers).
     """
     X_PROD_END  = 198.0
@@ -71,7 +83,6 @@ def extract_table_data(pdf_path):
     def col(ws, x0, x1): return [w for w in ws if x0 < w['x0'] < x1]
     def txt(ws): return clean(' '.join(w['text'] for w in ws))
 
-    # Construire la liste brute de segments par ligne y
     segs = []
     for y in sorted(by_y.keys()):
         ws = by_y[y]
@@ -83,120 +94,84 @@ def extract_table_data(pdf_path):
             'cmd':  txt(col(ws, X_CMD_START, 999)),
         })
 
-    # Fusionner en lignes produit cohérentes
-    # Règles observées dans le PDF :
-    #  - Le grand chiffre (quantité) peut être sur la ligne y-4 au-dessus
-    #    du nom de produit (Blette : qty='6.71' y=104 avant prod='Blette' y=108)
-    #  - L'unité peut être sur la même ligne que le produit (qty='bte' côté 'Navet')
-    #    ou sur une ligne séparée ('3' y=148 puis 'bte' sur 'Navet' y=152)
-    #  - Pour "Panier moyen" : '3' y=192, 'u.' sur la ligne y=196 avec le nom
-    #  - La fin du nom "rouge" peut apparaître APRÈS la ligne de données (y=268)
-
-    rows_raw = []
-
     def is_header(s):
         return any(kw in s for kw in ('PRODUIT', 'QUANTITÉ', 'MONTANT', 'COMMANDES'))
 
     def is_titre(s):
         return bool(re.match(r'^\d+\s+vente', s))
 
+    def is_name_only(seg):
+        """Segment qui n'est qu'une suite de nom produit (pas de données)."""
+        return (seg['prod']
+                and not seg['qty'] and not seg['mon'] and not seg['cmd']
+                and len(seg['prod'].split()) <= 2
+                and not re.search(r'\d', seg['prod'])
+                and not is_header(seg['prod']))
+
+    rows_raw = []
     i = 0
     while i < len(segs):
         s = segs[i]
 
-        # Sauter titre et en-tête
         if is_titre(s['prod']) or is_header(s['prod']):
             i += 1
             continue
-        # Lignes totalement vides en colonne produit ET qty (orphelins de grand chiffre)
-        if not s['prod'] and not s['mon'] and not s['cmd']:
-            # Ce segment est un chiffre flottant (grand chiffre de quantité)
-            # rattaché à la prochaine ligne produit -> on le conserve comme préfixe
-            i += 1
-            # On le récupère ci-dessous dans la logique de fusion
-            continue
-        # Ligne "1 vente" déplacée dans MON
         if s['mon'] and re.match(r'^\d+\s+vente', s['mon']) and not s['prod']:
             i += 1
             continue
-
         if not s['prod']:
             i += 1
             continue
 
-        # On a un nom de produit
         row = {'prod': s['prod'], 'qty': s['qty'], 'mon': s['mon'], 'cmd': s['cmd']}
 
-        # Chercher le grand chiffre flottant juste AVANT cette ligne (y - 4)
+        # Grand chiffre flottant sur la ligne juste AVANT le nom
         if i > 0:
-            prev = segs[i-1]
-            if (not prev['prod'] and prev['qty'] and not prev['mon'] and not prev['cmd']):
-                # C'est le grand chiffre séparé
-                if row['qty']:
-                    # Fusionner : grand chiffre + unité
-                    row['qty'] = prev['qty'] + ' ' + row['qty']
-                else:
-                    row['qty'] = prev['qty']
+            prev = segs[i - 1]
+            if not prev['prod'] and prev['qty'] and not prev['mon'] and not prev['cmd']:
+                row['qty'] = (prev['qty'] + ' ' + row['qty']).strip() if row['qty'] else prev['qty']
 
-        # Si la qty est encore incomplète (contient seulement l'unité sans chiffre),
-        # chercher la ligne suivante
-        if row['qty'] and not re.search(r'\d', row['qty']):
-            # qty ne contient que des lettres (ex: "bte", "kg") → chercher le chiffre avant
-            # (déjà traité ci-dessus normalement)
-            pass
-
-        # Chercher les lignes suivantes pour compléter qty/mon/cmd et suite du nom
+        # Parcourir les lignes suivantes pour compléter les champs manquants
         j = i + 1
         while j < len(segs):
             nxt = segs[j]
-            # Si c'est un prod non vide : soit suite du nom, soit nouveau produit
+
+            # Nouveau produit réel → stop (sauf si c'est une suite de nom)
             if nxt['prod'] and not is_header(nxt['prod']) and not is_titre(nxt['prod']):
-                # Suite du nom si : une seule "petite" partie de nom (1-2 mots sans chiffres)
-                # et pas de données numériques sur cette ligne
-                is_name_continuation = (
-                    not nxt['qty'] and not nxt['mon'] and not nxt['cmd']
-                    and len(nxt['prod'].split()) <= 2
-                    and not re.search(r'\d', nxt['prod'])
-                )
-                if is_name_continuation:
-                    row['prod'] = row['prod'] + ' ' + nxt['prod']
+                if is_name_only(nxt):
+                    row['prod'] += ' ' + nxt['prod']
                     j += 1
                     continue
                 break
-            if nxt['qty'] and not row['qty']:
-                row['qty'] = nxt['qty']
-            elif nxt['qty']:
-                row['qty'] = row['qty'] + ' ' + nxt['qty']
+
+            # Compléter qty
+            if nxt['qty']:
+                row['qty'] = (row['qty'] + ' ' + nxt['qty']).strip() if row['qty'] else nxt['qty']
+            # Compléter mon
             if nxt['mon'] and not row['mon']:
                 row['mon'] = nxt['mon']
-            if nxt['cmd'] and not row['cmd']:
-                row['cmd'] = nxt['cmd']
-            elif nxt['cmd']:
-                row['cmd'] = row['cmd'] + ' ' + nxt['cmd']
+            # Compléter cmd
+            if nxt['cmd']:
+                row['cmd'] = (row['cmd'] + ' ' + nxt['cmd']).strip() if row['cmd'] else nxt['cmd']
+
             j += 1
-            # Après avoir les données, continuer encore une ligne pour attraper
-            # une éventuelle suite de nom (ex: "rouge" après les données de la salade)
+
+            # Dès qu'on a qty et montant, vérifier encore une ligne pour suite de nom
             if row['qty'] and row['mon']:
-                # Regarder si la prochaine ligne est une suite de nom
-                if j < len(segs):
-                    nxt2 = segs[j]
-                    if (nxt2['prod'] and not nxt2['qty'] and not nxt2['mon'] and not nxt2['cmd']
-                            and len(nxt2['prod'].split()) <= 2
-                            and not re.search(r'\d', nxt2['prod'])
-                            and not is_header(nxt2['prod'])):
-                        row['prod'] = row['prod'] + ' ' + nxt2['prod']
-                        j += 1
+                if j < len(segs) and is_name_only(segs[j]):
+                    row['prod'] += ' ' + segs[j]['prod']
+                    j += 1
                 break
 
         i = j if j > i + 1 else i + 1
 
-        # Nettoyer la qty (parfois "3 u." accumule "3 u. u." si l'unité est répétée)
+        # Dédoublonner les unités dans qty (ex: "3 u. u." → "3 u.")
         row['qty'] = re.sub(r'\b(\w+\.?)\s+\1\b', r'\1', row['qty'])
 
         if row['qty'] and re.search(r'\d', row['qty']):
             rows_raw.append(row)
 
-    # Identifier paniers vs produits
+    # Séparer paniers / produits
     PANIER_KEYS = [('petit', 'Petit'), ('moyen', 'Moyen'), ('grand', 'Grand')]
     ORDER = {'petit': 0, 'moyen': 1, 'grand': 2}
     paniers, rows = [], []
@@ -218,7 +193,7 @@ def extract_table_data(pdf_path):
 
     paniers.sort(key=lambda p: ORDER.get(p['key'], 99))
 
-    # Calculer cells
+    # Calculer les cellules par panier
     for r in rows:
         parts = r['qty'].split()
         qty_total = float(parts[0]) if parts else 0
@@ -229,7 +204,6 @@ def extract_table_data(pdf_path):
         tokens = re.findall(r'1\s*x\s*([\d.]+)\s*(\S+)', r['cmd'])
         cells  = {p['key']: '' for p in paniers}
 
-        # Identifier le panier de chaque token par correspondance de division exacte
         used_keys = set()
         for q, u in tokens:
             qty_cmd = float(q)
@@ -249,13 +223,15 @@ def extract_table_data(pdf_path):
     return rows, paniers
 
 
-def build_new_page(rows, paniers):
+def build_new_page(rows, paniers, titre, avec_montant=False):
+    """Construit la nouvelle page au format A5, noir et blanc."""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(PAGE_W, PAGE_H))
 
-    W_PROD = 155.0
-    W_QTY  = 52.0
-    W_MON  = 46.0
+    # Largeurs de colonnes (proportionnées pour A5)
+    W_PROD = 108.0
+    W_QTY  = 38.0
+    W_MON  = 34.0 if avec_montant else 0.0
     n_p    = len(paniers)
     W_PAN  = (PAGE_RIGHT - MARGIN - W_PROD - W_QTY - W_MON) / max(n_p, 1)
 
@@ -268,62 +244,67 @@ def build_new_page(rows, paniers):
 
     # Fond blanc
     c.setFillColor(WHITE)
-    c.rect(MARGIN, MARGIN, PAGE_RIGHT - MARGIN, PAGE_H - 2*MARGIN, fill=1, stroke=0)
+    c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
-    # Titre
-    c.setFillColor(DARK)
-    c.setFont(FONT, 22.5)
-    c.drawCentredString(PAGE_W/2, PAGE_H - 42.5, "1 vente")
+    # ── Titre (date de retrait) ───────────────────────────────────────────────
+    c.setFillColor(BLACK)
+    c.setFont(FONT_BOLD, 16)
+    c.drawCentredString(PAGE_W / 2, PAGE_H - 28, titre)
 
-    # En-tête
-    HDR_Y = PAGE_H - 76.5
-    HDR_H = 21.0
-    c.setFillColor(HEADER_BG)
-    c.rect(MARGIN, HDR_Y, PAGE_RIGHT - MARGIN, HDR_H, fill=1, stroke=0)
+    # ── En-tête tableau : fond blanc, texte noir gras, bordure noire ──────────
+    HDR_Y = PAGE_H - 52.0
+    HDR_H = 16.0
 
-    hy = HDR_Y + 6
-    c.setFillColor(WHITE)
-    c.setFont(FONT, 7.6)
-    c.drawString(xP + 4, hy, "PRODUIT")
+    # Bordure de l'en-tête
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.6)
+    c.rect(MARGIN, HDR_Y, PAGE_RIGHT - MARGIN, HDR_H, fill=0, stroke=1)
+
+    hy = HDR_Y + 5
+    c.setFillColor(BLACK)
+    c.setFont(FONT_BOLD, 6.5)
+    c.drawString(xP + 3, hy, "PRODUIT")
     c.drawCentredString(cx(xQ, W_QTY), hy, "QUANTITÉ")
-    c.drawCentredString(cx(xM, W_MON), hy, "MONTANT")
+    if avec_montant:
+        c.drawCentredString(cx(xM, W_MON), hy, "MONTANT")
     for i, pan in enumerate(paniers):
         c.drawCentredString(cx(xPans[i], W_PAN), hy, f"{pan['n']} {pan['label'].upper()}")
 
-    # Séparateurs en-tête
-    c.setStrokeColor(SEP_HDR)
-    c.setLineWidth(0.4)
-    for xs in [xQ, xM] + xPans:
+    # Séparateurs verticaux en-tête
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.5)
+    sep_xs = [xQ] + ([xM] if avec_montant else []) + xPans
+    for xs in sep_xs:
         c.line(xs, HDR_Y, xs, HDR_Y + HDR_H)
 
-    # Lignes de données
-    ROW_H = 21.7
-    S_ROW = 8.1
-    S_QTY = 11.7
+    # ── Lignes de données ─────────────────────────────────────────────────────
+    ROW_H = 16.5
+    S_ROW = 6.5
+    S_QTY = 9.0
     cur_y = HDR_Y
 
     def draw_prod(text, ymid, max_w):
         c.setFont(FONT, S_ROW)
         if c.stringWidth(text, FONT, S_ROW) <= max_w:
-            c.drawString(xP + 4, ymid - S_ROW/2 + 1, text)
+            c.drawString(xP + 3, ymid - S_ROW / 2 + 1, text)
             return
         # Coupure au ' / '
         if ' / ' in text:
             p1, p2 = text.split(' / ', 1)
-            c.drawString(xP + 4, ymid + 1.5,        p1 + ' /')
-            c.drawString(xP + 4, ymid - S_ROW - 0.5, p2)
+            c.drawString(xP + 3, ymid + 1,        p1 + ' /')
+            c.drawString(xP + 3, ymid - S_ROW - 1, p2)
         else:
-            words = text.split()
+            wds = text.split()
             l1 = ''
-            for w in words:
+            for w in wds:
                 t = (l1 + ' ' + w).strip()
                 if c.stringWidth(t, FONT, S_ROW) <= max_w:
                     l1 = t
                 else:
                     break
             l2 = text[len(l1):].strip()
-            c.drawString(xP + 4, ymid + 1.5,        l1)
-            c.drawString(xP + 4, ymid - S_ROW - 0.5, l2)
+            c.drawString(xP + 3, ymid + 1,        l1)
+            c.drawString(xP + 3, ymid - S_ROW - 1, l2)
 
     for idx, row in enumerate(rows):
         bg = ROW_LIGHT if idx % 2 == 0 else ROW_DARK
@@ -332,49 +313,69 @@ def build_new_page(rows, paniers):
 
         c.setFillColor(bg)
         c.rect(MARGIN, rb, PAGE_RIGHT - MARGIN, ROW_H, fill=1, stroke=0)
-        c.setFillColor(DARK)
 
-        draw_prod(row['prod'], ym, W_PROD - 8)
+        # Bordure basse de la ligne
+        c.setStrokeColor(SEP)
+        c.setLineWidth(0.3)
+        c.line(MARGIN, rb, PAGE_RIGHT, rb)
 
-        # Quantité : grand chiffre + petite unité
+        c.setFillColor(BLACK)
+
+        draw_prod(row['prod'], ym, W_PROD - 6)
+
+        # Quantité
         c.setFont(FONT_BOLD, S_QTY)
         qw = c.stringWidth(row['qty_num'], FONT_BOLD, S_QTY)
         uw = c.stringWidth(row['unite'],   FONT,      S_ROW)
-        qx = cx(xQ, W_QTY) - (qw + 3 + uw)/2
-        c.drawString(qx, ym - S_QTY/2 + 1, row['qty_num'])
+        qx = cx(xQ, W_QTY) - (qw + 2 + uw) / 2
+        c.drawString(qx, ym - S_QTY / 2 + 1, row['qty_num'])
         c.setFont(FONT, S_ROW)
-        c.drawString(qx + qw + 3, ym - S_ROW/2 + 1, row['unite'])
+        c.drawString(qx + qw + 2, ym - S_ROW / 2 + 1, row['unite'])
 
         # Montant
-        c.setFont(FONT, S_ROW)
-        c.drawCentredString(cx(xM, W_MON), ym - S_ROW/2 + 1, row['mon'])
+        if avec_montant:
+            c.setFont(FONT, S_ROW)
+            c.drawCentredString(cx(xM, W_MON), ym - S_ROW / 2 + 1, row['mon'])
 
         # Cellules paniers
         for i, pan in enumerate(paniers):
             val = row['cells'].get(pan['key'], '')
             if val:
                 c.setFont(FONT, S_ROW)
-                c.drawCentredString(cx(xPans[i], W_PAN), ym - S_ROW/2 + 1, val)
+                c.drawCentredString(cx(xPans[i], W_PAN), ym - S_ROW / 2 + 1, val)
 
         # Séparateurs verticaux
         c.setStrokeColor(SEP)
-        c.setLineWidth(0.4)
-        for xs in [xQ, xM] + xPans:
+        c.setLineWidth(0.3)
+        for xs in sep_xs:
             c.line(xs, rb, xs, cur_y)
 
         cur_y = rb
+
+    # Bordure extérieure du tableau (bas + côtés)
+    table_top    = HDR_Y + HDR_H
+    table_bottom = cur_y
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.6)
+    c.rect(MARGIN, table_bottom, PAGE_RIGHT - MARGIN, table_top - table_bottom,
+           fill=0, stroke=1)
 
     c.save()
     packet.seek(0)
     return packet
 
 
-def transformer_pdf(input_path, output_path=None):
+def transformer_pdf(input_path, output_path=None, avec_montant=False):
     input_path  = Path(input_path)
     output_path = Path(output_path) if output_path else \
                   input_path.parent / (input_path.stem + "_modifie.pdf")
 
     print(f"Lecture de : {input_path}")
+
+    date = extract_date_from_page2(input_path)
+    titre = f"Retrait du {date}" if date else "Ventes"
+    print(f"  Titre : {titre}")
+
     rows, paniers = extract_table_data(input_path)
 
     if not paniers:
@@ -387,13 +388,11 @@ def transformer_pdf(input_path, output_path=None):
     for r in rows:
         print(f"    {r['prod']} | {r['qty_num']} {r['unite']} | {r['mon']} | {r['cells']}")
 
-    new_page = build_new_page(rows, paniers)
+    new_page = build_new_page(rows, paniers, titre, avec_montant=avec_montant)
 
-    original = PdfReader(str(input_path))
-    writer   = PdfWriter()
+    # Page unique
+    writer = PdfWriter()
     writer.add_page(PdfReader(new_page).pages[0])
-    for page in original.pages[1:]:
-        writer.add_page(page)
 
     with open(output_path, "wb") as f:
         writer.write(f)
@@ -404,4 +403,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(0)
-    transformer_pdf(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    args = sys.argv[1:]
+    avec_montant = "--montant" in args
+    args = [a for a in args if a != "--montant"]
+    transformer_pdf(args[0], args[1] if len(args) > 1 else None, avec_montant=avec_montant)
