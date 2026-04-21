@@ -8,7 +8,7 @@ Script pour transformer la première page d'un PDF de ventes de légumes.
 - Lignes "Panier de la semaine" supprimées
 - Page unique au format A5
 
-Usage : python3 otf2map entree.pdf [sortie.pdf]
+Usage : python3 otf2amap.py entree.pdf [sortie.pdf]
 """
 
 import sys
@@ -60,10 +60,34 @@ def extract_date_from_page2(pdf_path):
     return m.group(1) if m else None
 
 
+def parse_raw_cmd(raw):
+    """
+    Dans le cas où qty et montant sont fusionnés dans la colonne cmd,
+    extrait (qty, montant, commandes) depuis une chaîne du type :
+    '5.84 kg 34,47 € 1 x 2.1 kg 1 x 3.74 kg'
+    ou '3 bte 8,70 € 1 x 3 bte'
+    ou '3 u. 45,90 € 1 x 3 u.'
+    """
+    # Motif : <nombre> <unité> <prix> € <reste commandes>
+    m = re.match(
+        r'^([\d.]+)\s+(\S+)\s+([\d,]+\s*€)(.*)',
+        raw.strip()
+    )
+    if m:
+        qty  = m.group(1) + ' ' + m.group(2)
+        mon  = m.group(3).strip()
+        cmd  = m.group(4).strip()
+        return qty, mon, cmd
+    return '', '', raw
+
+
 def extract_table_data(pdf_path):
     """
     Extrait les données de la page 1.
     Retourne (rows, paniers).
+    Gère deux mises en page :
+      - Layout A : colonnes QUANTITÉ et MONTANT distinctes (x 198-297)
+      - Layout B : tout dans la colonne après PRODUIT (x > ~198), sans colonnes séparées
     """
     X_PROD_END  = 198.0
     X_QTY_START = 198.0
@@ -83,16 +107,37 @@ def extract_table_data(pdf_path):
     def col(ws, x0, x1): return [w for w in ws if x0 < w['x0'] < x1]
     def txt(ws): return clean(' '.join(w['text'] for w in ws))
 
+    # Détecter le layout : si aucune ligne de données n'a de mots dans
+    # la zone QUANTITÉ (198-252), on est en layout B (tout dans cmd).
+    data_ys = [y for y in sorted(by_y.keys()) if y > 70]
+    has_qty_col = any(
+        col(by_y[y], X_QTY_START, X_QTY_END)
+        for y in data_ys[:5]
+    )
+
     segs = []
     for y in sorted(by_y.keys()):
         ws = by_y[y]
-        segs.append({
-            'y':    y,
-            'prod': txt(col(ws, 0,           X_PROD_END)),
-            'qty':  txt(col(ws, X_QTY_START, X_QTY_END)),
-            'mon':  txt(col(ws, X_MON_START, X_MON_END)),
-            'cmd':  txt(col(ws, X_CMD_START, 999)),
-        })
+        prod_ws = [w for w in ws if w['x0'] < X_PROD_END]
+        if has_qty_col:
+            segs.append({
+                'y':    y,
+                'prod': txt(prod_ws),
+                'qty':  txt(col(ws, X_QTY_START, X_QTY_END)),
+                'mon':  txt(col(ws, X_MON_START, X_MON_END)),
+                'cmd':  txt(col(ws, X_CMD_START, 999)),
+            })
+        else:
+            # Layout B : tout ce qui est après PRODUIT va dans cmd brut
+            # (qty/mon seront extraits apres fusion des lignes fragmentees)
+            raw_cmd = txt([w for w in ws if w['x0'] >= X_PROD_END])
+            segs.append({
+                'y':    y,
+                'prod': txt(prod_ws),
+                'qty':  '',
+                'mon':  '',
+                'cmd':  raw_cmd,
+            })
 
     def is_header(s):
         return any(kw in s for kw in ('PRODUIT', 'QUANTITÉ', 'MONTANT', 'COMMANDES'))
@@ -126,10 +171,14 @@ def extract_table_data(pdf_path):
         row = {'prod': s['prod'], 'qty': s['qty'], 'mon': s['mon'], 'cmd': s['cmd']}
 
         # Grand chiffre flottant sur la ligne juste AVANT le nom
+        # Layout A : chiffre dans qty ; Layout B : chiffre dans cmd
         if i > 0:
             prev = segs[i - 1]
-            if not prev['prod'] and prev['qty'] and not prev['mon'] and not prev['cmd']:
-                row['qty'] = (prev['qty'] + ' ' + row['qty']).strip() if row['qty'] else prev['qty']
+            if not prev['prod'] and not prev['mon']:
+                if prev['qty'] and not prev['cmd']:
+                    row['qty'] = (prev['qty'] + ' ' + row['qty']).strip() if row['qty'] else prev['qty']
+                elif prev['cmd'] and not prev['qty']:
+                    row['cmd'] = (prev['cmd'] + ' ' + row['cmd']).strip() if row['cmd'] else prev['cmd']
 
         # Parcourir les lignes suivantes pour compléter les champs manquants
         j = i + 1
@@ -164,6 +213,10 @@ def extract_table_data(pdf_path):
                 break
 
         i = j if j > i + 1 else i + 1
+
+        # En layout B, qty et mon sont vides : les extraire depuis cmd fusionne
+        if not row['qty'] and row['cmd']:
+            row['qty'], row['mon'], row['cmd'] = parse_raw_cmd(row['cmd'])
 
         # Dédoublonner les unités dans qty (ex: "3 u. u." → "3 u.")
         row['qty'] = re.sub(r'\b(\w+\.?)\s+\1\b', r'\1', row['qty'])
@@ -204,19 +257,37 @@ def extract_table_data(pdf_path):
         tokens = re.findall(r'1\s*x\s*([\d.]+)\s*(\S+)', r['cmd'])
         cells  = {p['key']: '' for p in paniers}
 
-        used_keys = set()
-        for q, u in tokens:
-            qty_cmd = float(q)
-            best, best_err = None, float('inf')
-            for pan in paniers:
-                if pan['key'] in used_keys:
-                    continue
-                err = abs(qty_cmd / pan['n'] - round(qty_cmd / pan['n'], 4))
-                if err < best_err:
-                    best_err, best = err, pan
-            if best:
-                cells[best['key']] = f"{fmt(qty_cmd / best['n'])} {u}"
-                used_keys.add(best['key'])
+        # Attribuer chaque token au bon panier.
+        #
+        # Règle : qté/panier est croissant du petit au grand panier.
+        # 'n' = nombre de paniers de ce type dans la commande :
+        #   petit panier → beaucoup d'exemplaires → grand n
+        #   grand panier → peu d'exemplaires → petit n
+        # Donc qté_totale_token / n donne la qté par panier,
+        # et la contrainte qté/petit <= qté/moyen <= qté/grand
+        # correspond à : token trié croissant ↔ panier trié par n croissant.
+        #
+        # Cas à 1 token : on choisit le panier dont n divise exactement
+        # la quantité totale (ratio entier), ce qui identifie le panier sans ambiguïté.
+
+        import itertools
+
+        qtys  = [float(q) for q, u in tokens]
+        units = [u for q, u in tokens]
+
+        if len(qtys) == 1:
+            # Chercher le panier dont n divise exactement la quantité
+            q, u = float(tokens[0][0]), tokens[0][1]
+            best = min(paniers, key=lambda p: abs(q / p['n'] - round(q / p['n'])))
+            cells[best['key']] = f"{fmt(q / best['n'])} {u}"
+        else:
+            # Trier les tokens croissant et les paniers par n croissant,
+            # puis les associer dans cet ordre.
+            token_pairs_sorted = sorted(zip(qtys, units), key=lambda x: x[0])
+            pans_sorted_by_n   = sorted(paniers, key=lambda p: p['n'])
+            # On ne sélectionne que len(qtys) paniers (les plus petits n en premier)
+            for (q, u), pan in zip(token_pairs_sorted, pans_sorted_by_n):
+                cells[pan['key']] = f"{fmt(q / pan['n'])} {u}"
 
         r['cells'] = cells
 
