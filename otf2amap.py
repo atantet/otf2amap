@@ -23,6 +23,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A5
 from reportlab.lib.colors import Color, black, white
 
+SORTIE = "feuille_paniers_amap"
+
 # ── Couleurs ──────────────────────────────────────────────────────────────────
 BLACK     = Color(0, 0, 0)
 WHITE     = Color(1, 1, 1)
@@ -31,7 +33,7 @@ ROW_DARK  = Color(0.87, 0.87, 0.87)   # gris un peu plus foncé pour lignes impa
 SEP       = Color(0.65, 0.65, 0.65)
 
 # ── Format A5 (points) ────────────────────────────────────────────────────────
-PAGE_W, PAGE_H = A5          # 419.53 x 595.28
+PAGE_H, PAGE_W = A5          # paysage : 595.28 x 419.53
 MARGIN     = 10.0
 PAGE_RIGHT = PAGE_W - MARGIN
 
@@ -257,36 +259,31 @@ def extract_table_data(pdf_path):
         tokens = re.findall(r'1\s*x\s*([\d.]+)\s*(\S+)', r['cmd'])
         cells  = {p['key']: '' for p in paniers}
 
-        # Attribuer chaque token au bon panier.
-        #
-        # Règle : qté/panier est croissant du petit au grand panier.
-        # 'n' = nombre de paniers de ce type dans la commande :
-        #   petit panier → beaucoup d'exemplaires → grand n
-        #   grand panier → peu d'exemplaires → petit n
-        # Donc qté_totale_token / n donne la qté par panier,
-        # et la contrainte qté/petit <= qté/moyen <= qté/grand
-        # correspond à : token trié croissant ↔ panier trié par n croissant.
-        #
-        # Cas à 1 token : on choisit le panier dont n divise exactement
-        # la quantité totale (ratio entier), ce qui identifie le panier sans ambiguïté.
+        # Attribuer chaque token au bon panier par permutation optimale :
+        # pour chaque appariement token<->panier possible, on calcule l'erreur
+        # d'arrondi (qte_token / n_panier doit etre un entier propre).
+        # L'appariement avec l'erreur minimale est retenu.
+        # - 1 token : produit present dans un seul type de panier -> case vide pour l'autre
+        # - N tokens : fonctionne pour kg, bottes, etc.
 
         import itertools
 
         qtys  = [float(q) for q, u in tokens]
         units = [u for q, u in tokens]
 
-        if len(qtys) == 1:
-            # Chercher le panier dont n divise exactement la quantité
-            q, u = float(tokens[0][0]), tokens[0][1]
-            best = min(paniers, key=lambda p: abs(q / p['n'] - round(q / p['n'])))
-            cells[best['key']] = f"{fmt(q / best['n'])} {u}"
-        else:
-            # Trier les tokens croissant et les paniers par n croissant,
-            # puis les associer dans cet ordre.
-            token_pairs_sorted = sorted(zip(qtys, units), key=lambda x: x[0])
-            pans_sorted_by_n   = sorted(paniers, key=lambda p: p['n'])
-            # On ne sélectionne que len(qtys) paniers (les plus petits n en premier)
-            for (q, u), pan in zip(token_pairs_sorted, pans_sorted_by_n):
+        if qtys:
+            best_err    = float('inf')
+            best_assign = list(range(len(qtys)))
+            for perm in itertools.permutations(range(len(paniers)), len(qtys)):
+                err = sum(
+                    abs((qtys[i] / paniers[perm[i]]['n']) - round(qtys[i] / paniers[perm[i]]['n']))
+                    for i in range(len(qtys))
+                )
+                if err < best_err:
+                    best_err    = err
+                    best_assign = perm
+            for i, (q, u) in enumerate(zip(qtys, units)):
+                pan = paniers[best_assign[i]]
                 cells[pan['key']] = f"{fmt(q / pan['n'])} {u}"
 
         r['cells'] = cells
@@ -349,33 +346,38 @@ def build_new_page(rows, paniers, titre, avec_montant=False):
         c.line(xs, HDR_Y, xs, HDR_Y + HDR_H)
 
     # ── Lignes de données ─────────────────────────────────────────────────────
-    ROW_H = 16.5
-    S_ROW = 6.5
-    S_QTY = 9.0
+    # ROW_H calcule pour remplir toute la hauteur disponible
+    S_ROW  = 6.5   # (gardé pour compatibilité, non utilisé directement)
+    S_QTY  = 9.0
+    S_PROD = 8.0   # produit
+    S_PAN  = 8.5   # colonnes paniers (et montant)
+    TABLE_BOTTOM = MARGIN
+    available_h  = HDR_Y - TABLE_BOTTOM
+    ROW_H = available_h / max(len(rows), 1)
     cur_y = HDR_Y
 
     def draw_prod(text, ymid, max_w):
-        c.setFont(FONT, S_ROW)
-        if c.stringWidth(text, FONT, S_ROW) <= max_w:
-            c.drawString(xP + 3, ymid - S_ROW / 2 + 1, text)
+        c.setFont(FONT, S_PROD)
+        if c.stringWidth(text, FONT, S_PROD) <= max_w:
+            c.drawString(xP + 3, ymid - S_PROD / 2 + 1, text)
             return
         # Coupure au ' / '
         if ' / ' in text:
             p1, p2 = text.split(' / ', 1)
-            c.drawString(xP + 3, ymid + 1,        p1 + ' /')
-            c.drawString(xP + 3, ymid - S_ROW - 1, p2)
+            c.drawString(xP + 3, ymid + 1,         p1 + ' /')
+            c.drawString(xP + 3, ymid - S_PROD - 1, p2)
         else:
             wds = text.split()
             l1 = ''
             for w in wds:
                 t = (l1 + ' ' + w).strip()
-                if c.stringWidth(t, FONT, S_ROW) <= max_w:
+                if c.stringWidth(t, FONT, S_PROD) <= max_w:
                     l1 = t
                 else:
                     break
             l2 = text[len(l1):].strip()
-            c.drawString(xP + 3, ymid + 1,        l1)
-            c.drawString(xP + 3, ymid - S_ROW - 1, l2)
+            c.drawString(xP + 3, ymid + 1,         l1)
+            c.drawString(xP + 3, ymid - S_PROD - 1, l2)
 
     for idx, row in enumerate(rows):
         bg = ROW_LIGHT if idx % 2 == 0 else ROW_DARK
@@ -405,15 +407,15 @@ def build_new_page(rows, paniers, titre, avec_montant=False):
 
         # Montant
         if avec_montant:
-            c.setFont(FONT, S_ROW)
-            c.drawCentredString(cx(xM, W_MON), ym - S_ROW / 2 + 1, row['mon'])
+            c.setFont(FONT, S_PAN)
+            c.drawCentredString(cx(xM, W_MON), ym - S_PAN / 2 + 1, row['mon'])
 
         # Cellules paniers
         for i, pan in enumerate(paniers):
             val = row['cells'].get(pan['key'], '')
             if val:
-                c.setFont(FONT, S_ROW)
-                c.drawCentredString(cx(xPans[i], W_PAN), ym - S_ROW / 2 + 1, val)
+                c.setFont(FONT_BOLD, S_PAN)
+                c.drawCentredString(cx(xPans[i], W_PAN), ym - S_PAN / 2 + 1, val)
 
         # Séparateurs verticaux
         c.setStrokeColor(SEP)
@@ -425,7 +427,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False):
 
     # Bordure extérieure du tableau (bas + côtés)
     table_top    = HDR_Y + HDR_H
-    table_bottom = cur_y
+    table_bottom = TABLE_BOTTOM
     c.setStrokeColor(BLACK)
     c.setLineWidth(0.6)
     c.rect(MARGIN, table_bottom, PAGE_RIGHT - MARGIN, table_top - table_bottom,
@@ -439,7 +441,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False):
 def transformer_pdf(input_path, output_path=None, avec_montant=False):
     input_path  = Path(input_path)
     output_path = Path(output_path) if output_path else \
-                  input_path.parent / (input_path.stem + "_modifie.pdf")
+                  input_path.parent / (SORTIE + ".pdf")
 
     print(f"Lecture de : {input_path}")
 
