@@ -7,7 +7,13 @@ Colonnes générées : DATE | TOTAL | N PETIT | N MOYEN | [N GRAND]
 - Lignes "Panier de la semaine" filtrées
 - Format A5 paysage, noir et blanc
 
-Usage : python3 otf2amap.py entree.pdf [sortie.pdf] [--montant] [--scale 1.0]
+Usage : python3 otf2amap.py entree.pdf [sortie] [--pdf] [--montant] [--scale 1.0]
+
+Formats de sortie (défaut : PNG) :
+  sortie.png   image PNG haute résolution (défaut)
+  --pdf        force la sortie en PDF (ou nommer la sortie *.pdf)
+  sortie.md    tableau Markdown
+  sortie.txt   tableau texte brut
 """
 
 import sys
@@ -139,6 +145,7 @@ def extract_table_data(pdf_path):
 
         row = {'prod': s['prod'], 'qty': s['qty'], 'mon': s['mon'], 'cmd': s['cmd']}
 
+        # Chiffre sur la ligne juste avant le nom (layout A ou B)
         if i > 0:
             prev = segs[i - 1]
             if not prev['prod'] and not prev['mon']:
@@ -147,6 +154,7 @@ def extract_table_data(pdf_path):
                 elif prev['cmd'] and not prev['qty']:
                     row['cmd'] = (prev['cmd'] + ' ' + row['cmd']).strip() if row['cmd'] else prev['cmd']
 
+        # Compléter les champs depuis les lignes suivantes
         j = i + 1
         while j < len(segs):
             nxt = segs[j]
@@ -170,14 +178,17 @@ def extract_table_data(pdf_path):
 
         i = j if j > i + 1 else i + 1
 
+        # Layout B : extraire qty et mon depuis cmd
         if not row['qty'] and row['cmd']:
             row['qty'], row['mon'], row['cmd'] = parse_raw_cmd(row['cmd'])
 
+        # Dédoublonner les unités (ex: "3 u. u." → "3 u.")
         row['qty'] = re.sub(r'\b(\w+\.?)\s+\1\b', r'\1', row['qty'])
 
         if row['qty'] and re.search(r'\d', row['qty']):
             rows_raw.append(row)
 
+    # Séparer paniers et produits
     PANIER_KEYS = [('petit', 'Petit'), ('moyen', 'Moyen'), ('grand', 'Grand')]
     ORDER = {'petit': 0, 'moyen': 1, 'grand': 2}
     paniers, rows = [], []
@@ -194,6 +205,7 @@ def extract_table_data(pdf_path):
 
     paniers.sort(key=lambda p: ORDER.get(p['key'], 99))
 
+    # Calculer les quantités par panier pour chaque produit
     for r in rows:
         parts = r['qty'].split()
         qty_total = float(parts[0]) if parts else 0
@@ -206,6 +218,8 @@ def extract_table_data(pdf_path):
         units  = [u for q, u in tokens]
 
         if qtys:
+            # Permutation optimale : score lexicographique sur l'erreur d'arrondi
+            # à 2, 1 et 0 décimales — favorise les ratios qté/n les plus ronds.
             best_score  = None
             best_assign = list(range(len(qtys)))
             for perm in itertools.permutations(range(len(paniers)), len(qtys)):
@@ -233,9 +247,12 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(PAGE_W, PAGE_H))
 
+    # Tailles de police : une seule taille S pour tout le contenu ;
+    # les unités (kg, bte, u.) sont affichées en S × 0.65.
     S      = 16.0 * scale
     S_UNIT = S * 0.65
 
+    # Largeurs de colonnes (indépendantes de scale)
     W_QTY  = 64.0
     W_MON  = 40.0 if avec_montant else 0.0
     W_PROD = 180.0
@@ -250,6 +267,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
 
     def cx(x0, w): return x0 + w / 2
 
+    # Hauteurs
     MARGIN_TOP = 10.0
     HDR_H      = S + 18
     ROW_H_MIN  = S + 12
@@ -258,9 +276,11 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
     available_h = HDR_Y - MARGIN
     ROW_H       = max(ROW_H_MIN, available_h / max(len(rows), 1))
 
+    # Fond blanc
     c.setFillColor(WHITE)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
+    # En-tête : trait bas + séparateurs verticaux uniquement (pas de cadre)
     hy = HDR_Y + (HDR_H - S) / 2
     c.setFillColor(BLACK)
     c.setFont(FONT_BOLD, S)
@@ -273,11 +293,13 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
 
     c.setStrokeColor(BLACK)
     c.setLineWidth(0.4)
-    c.line(MARGIN, HDR_Y, PAGE_RIGHT, HDR_Y)
+    c.line(MARGIN, HDR_Y, PAGE_RIGHT, HDR_Y)   # trait bas de l'en-tête
     for xs in sep_xs:
-        c.line(xs, HDR_Y, xs, HDR_Y + HDR_H)
+        c.line(xs, HDR_Y, xs, HDR_Y + HDR_H)   # séparateurs verticaux
 
+    # Lignes de données
     def wrap_prod(text, max_w):
+        """Découpe le nom produit en lignes sans couper les mots."""
         words = text.split()
         lines, cur = [], ''
         for w in words:
@@ -299,6 +321,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
             c.drawString(xP + 4, y_top - i * line_h, line)
 
     def draw_qty(num, unit, xc, wc, ym):
+        """Chiffre gras + unité petite, centrés dans la colonne."""
         c.setFont(FONT_BOLD, S)
         qw = c.stringWidth(num,  FONT_BOLD, S)
         uw = c.stringWidth(unit, FONT,      S_UNIT)
@@ -331,6 +354,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
                     c.setFont(FONT_BOLD, S)
                     c.drawCentredString(cx(xPans[i], W_PAN), ym - S / 2, val)
 
+        # Trait de séparation (haut de ligne, après le fond)
         c.setStrokeColor(BLACK)
         c.setLineWidth(0.4)
         c.line(MARGIN, cur_y, PAGE_RIGHT, cur_y)
@@ -344,11 +368,63 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
     return packet
 
 
+# ── Sorties texte ─────────────────────────────────────────────────────────────
+
+def build_text_table(rows, paniers, titre, mode='md'):
+    """
+    Génère le tableau en Markdown (mode='md') ou texte ASCII (mode='txt').
+    """
+    pan_hdrs = [f"{p['n']} {p['label'].upper()}" for p in paniers]
+    hdrs  = [titre, 'TOTAL'] + pan_hdrs
+    col_w = [max(len(hdrs[0]), max((len(r['prod']) for r in rows), default=0))]
+    col_w += [max(len(hdrs[1]), max((len(f"{r['qty_num']} {r['unite']}") for r in rows), default=0))]
+    for i, pan in enumerate(paniers):
+        col_w.append(max(len(pan_hdrs[i]),
+                     max((len(r['cells'].get(pan['key'], '')) for r in rows), default=0)))
+    col_w = [w + 2 for w in col_w]
+
+    if mode == 'md':
+        def row_str(cells):
+            parts = [f" {c:<{col_w[i]-1}}" for i, c in enumerate(cells)]
+            return '|' + '|'.join(parts) + '|'
+        def sep_line():
+            return '|' + '|'.join('-' * col_w[i] for i in range(len(hdrs))) + '|'
+    else:  # txt : bordures + et séparateurs | et -
+        def row_str(cells):
+            parts = [f" {c:<{col_w[i]-1}}" for i, c in enumerate(cells)]
+            return '+' + '|'.join(parts) + '+'
+        def sep_line():
+            return '+' + '+'.join('-' * col_w[i] for i in range(len(hdrs))) + '+'
+
+    lines = [row_str(hdrs), sep_line()]
+    for r in rows:
+        cells = [r['prod'], f"{r['qty_num']} {r['unite']}"]
+        cells += [r['cells'].get(p['key'], '') for p in paniers]
+        lines.append(row_str(cells))
+    if mode == 'txt':
+        lines.append(sep_line())
+    return '\n'.join(lines)
+
+
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 
-def transformer_pdf(input_path, output_path=None, avec_montant=False, scale=1.0):
-    input_path  = Path(input_path)
-    output_path = Path(output_path) if output_path else input_path.parent / (SORTIE + ".pdf")
+def transformer(input_path, output_path=None, fmt_out='png',
+                avec_montant=False, scale=1.0):
+    """
+    fmt_out : 'png' (défaut), 'pdf', 'md', 'txt'
+    """
+    input_path = Path(input_path)
+
+    # Déterminer le format depuis l'extension du fichier de sortie si fourni
+    if output_path:
+        ext = Path(output_path).suffix.lower().lstrip('.')
+        if ext in ('pdf', 'png', 'md', 'txt'):
+            fmt_out = ext
+
+    # Nom de sortie par défaut
+    if not output_path:
+        output_path = input_path.parent / (SORTIE + '.' + fmt_out)
+    output_path = Path(output_path)
 
     print(f"Lecture de : {input_path}")
     titre = extract_date_from_page2(input_path) or "Ventes"
@@ -365,12 +441,37 @@ def transformer_pdf(input_path, output_path=None, avec_montant=False, scale=1.0)
     for r in rows:
         print(f"    {r['prod']} | {r['qty_num']} {r['unite']} | {r['cells']}")
 
-    page = build_new_page(rows, paniers, titre, avec_montant=avec_montant, scale=scale)
-    writer = PdfWriter()
-    writer.add_page(PdfReader(page).pages[0])
-    with open(output_path, "wb") as f:
-        writer.write(f)
-    print(f"PDF enregistré : {output_path}")
+    if fmt_out == 'pdf':
+        page = build_new_page(rows, paniers, titre, avec_montant=avec_montant, scale=scale)
+        writer = PdfWriter()
+        writer.add_page(PdfReader(page).pages[0])
+        with open(output_path, "wb") as f:
+            writer.write(f)
+
+    elif fmt_out == 'png':
+        # Générer le PDF en mémoire puis convertir en PNG via pdf2image
+        try:
+            from pdf2image import convert_from_bytes
+        except ImportError:
+            print("ERREUR : pip install pdf2image poppler pour la sortie PNG.")
+            sys.exit(1)
+        page = build_new_page(rows, paniers, titre, avec_montant=avec_montant, scale=scale)
+        writer = PdfWriter()
+        writer.add_page(PdfReader(page).pages[0])
+        buf = io.BytesIO()
+        writer.write(buf)
+        images = convert_from_bytes(buf.getvalue(), dpi=200)
+        images[0].save(str(output_path))
+
+    elif fmt_out == 'md':
+        text = build_text_table(rows, paniers, titre, mode='md')
+        output_path.write_text(text, encoding='utf-8')
+
+    elif fmt_out == 'txt':
+        text = build_text_table(rows, paniers, titre, mode='txt')
+        output_path.write_text(text, encoding='utf-8')
+
+    print(f"Fichier enregistré : {output_path}")
 
 
 if __name__ == "__main__":
@@ -380,7 +481,8 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     avec_montant = "--montant" in args
-    args = [a for a in args if a != "--montant"]
+    force_pdf    = "--pdf" in args
+    args = [a for a in args if a not in ("--montant", "--pdf")]
 
     scale = 1.0
     for i, a in enumerate(args):
@@ -390,5 +492,7 @@ if __name__ == "__main__":
             scale = float(args[i + 1])
     args = [a for a in args if not a.startswith("--scale")]
 
-    transformer_pdf(args[0], args[1] if len(args) > 1 else None,
-                    avec_montant=avec_montant, scale=scale)
+    fmt_out = 'pdf' if force_pdf else 'png'
+
+    transformer(args[0], args[1] if len(args) > 1 else None,
+                fmt_out=fmt_out, avec_montant=avec_montant, scale=scale)
