@@ -10,10 +10,11 @@ Colonnes générées : DATE | TOTAL | N PETIT | N MOYEN | [N GRAND]
 Usage : python3 otf2amap.py entree.pdf [sortie] [--pdf] [--montant] [--scale 1.0]
 
 Formats de sortie (défaut : PNG) :
-  sortie.png   image PNG haute résolution (défaut)
-  --pdf        force la sortie en PDF (ou nommer la sortie *.pdf)
-  sortie.md    tableau Markdown
-  sortie.txt   tableau texte brut
+  --format=png   image PNG haute résolution (défaut)
+  --format=pdf   PDF
+  --format=md    tableau Markdown
+  --format=txt   tableau texte brut
+  (l'extension du fichier de sortie prime sur --format)
 """
 
 import sys
@@ -481,8 +482,7 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     avec_montant = "--montant" in args
-    force_pdf    = "--pdf" in args
-    args = [a for a in args if a not in ("--montant", "--pdf")]
+    args = [a for a in args if a != "--montant"]
 
     scale = 1.0
     for i, a in enumerate(args):
@@ -492,7 +492,11 @@ if __name__ == "__main__":
             scale = float(args[i + 1])
     args = [a for a in args if not a.startswith("--scale")]
 
-    fmt_out = 'pdf' if force_pdf else 'png'
+    fmt_out = 'png'
+    for a in args:
+        if a.startswith("--format="):
+            fmt_out = a.split("=")[1].lower()
+    args = [a for a in args if not a.startswith("--format=")]
 
     transformer(args[0], args[1] if len(args) > 1 else None,
                 fmt_out=fmt_out, avec_montant=avec_montant, scale=scale)
