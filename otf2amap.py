@@ -15,6 +15,15 @@ Formats de sortie (défaut : PNG) :
   --format=md    tableau Markdown
   --format=txt   tableau texte brut
   (l'extension du fichier de sortie prime sur --format)
+
+Configuration (config.toml dans le même dossier que le script) :
+  [output]
+  dossier = "/chemin/vers/dossier"   # dossier de sortie
+  format  = "png"                    # format de sortie
+  nom     = "mon_fichier"            # nom sans extension (remplace le nom par défaut)
+
+Les options ligne de commande prévalent sur config.toml.
+config.toml doit exister ; ses variables sont toutes optionnelles.
 """
 
 import sys
@@ -24,6 +33,13 @@ from pathlib import Path
 from collections import defaultdict
 import itertools
 from datetime import datetime, timedelta
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
@@ -69,6 +85,24 @@ def prefixe_semaine(date_str):
         return f"{annee}_S{semaine:02d}"
     except Exception:
         return None
+
+
+def load_config():
+    """
+    Charge config.toml depuis le dossier du script.
+    Erreur si le fichier n'existe pas.
+    Retourne un dict avec les clés trouvées dans [output] : dossier, format, nom.
+    """
+    config_path = Path(__file__).parent / 'config.toml'
+    if not config_path.exists():
+        print(f"ERREUR : config.toml introuvable ({config_path})")
+        sys.exit(1)
+    if tomllib is None:
+        print("ERREUR : pip install tomli pour lire config.toml (Python < 3.11)")
+        sys.exit(1)
+    with open(config_path, 'rb') as f:
+        data = tomllib.load(f)
+    return data.get('output', {})
 
 
 # ── Extraction PDF ─────────────────────────────────────────────────────────────
@@ -523,11 +557,55 @@ if __name__ == "__main__":
             scale = float(args[i + 1])
     args = [a for a in args if not a.startswith("--scale")]
 
-    fmt_out = 'png'
+    # Format ligne de commande
+    fmt_cli = None
     for a in args:
         if a.startswith("--format="):
-            fmt_out = a.split("=")[1].lower()
+            fmt_cli = a.split("=")[1].lower()
     args = [a for a in args if not a.startswith("--format=")]
 
-    transformer(args[0], args[1] if len(args) > 1 else None,
+    # Fichier de sortie ligne de commande
+    input_path = str(Path(args[0]).expanduser().resolve())
+    output_cli = str(Path(args[1]).expanduser().resolve()) if len(args) > 1 else None
+
+    # Charger config.toml
+    cfg = load_config()
+
+    # Résolution du format (CLI > config > défaut)
+    fmt_out = fmt_cli or cfg.get('format', 'png')
+
+    # Résolution du fichier de sortie
+    # Si output_cli fourni : il prime (l'extension peut overrider fmt_out, géré dans transformer)
+    # Sinon : construire depuis config (dossier + nom) ou laisser transformer gérer le défaut
+    if output_cli:
+        output_path = output_cli
+    else:
+        dossier = cfg.get('dossier')
+        nom     = cfg.get('nom')          # nom sans extension
+        if dossier or nom:
+            # Extraire la date pour le préfixe semaine si pas de nom explicite
+            titre_tmp = extract_date_from_page2(input_path)
+            prefix = prefixe_semaine(titre_tmp) if titre_tmp else 'inconnu'
+            base = nom if nom else f"{prefix}_{SORTIE}"
+            dossier_path = Path(dossier).expanduser().resolve() if dossier else Path(input_path).expanduser().resolve().parent
+            output_path = str(dossier_path / f"{base}.{fmt_out}")
+        else:
+            output_path = None  # transformer calculera le nom par défaut
+
+    # Créer le dossier de sortie si nécessaire (avec confirmation)
+    if output_path:
+        out_dir = Path(output_path).expanduser().resolve().parent
+    else:
+        out_dir = Path(input_path).expanduser().resolve().parent
+    if not out_dir.exists():
+        print(f"Le dossier de sortie n'existe pas : {out_dir}")
+        reponse = input("Créer ce dossier et ses parents ? [o/N] ").strip().lower()
+        if reponse in ('o', 'oui', 'y', 'yes'):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Dossier créé : {out_dir}")
+        else:
+            print("Annulé.")
+            sys.exit(0)
+
+    transformer(input_path, output_path,
                 fmt_out=fmt_out, avec_montant=avec_montant, scale=scale)

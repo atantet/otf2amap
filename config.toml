@@ -1,0 +1,8 @@
+# Configuration otf2amap
+# Toutes les variables sont optionnelles.
+# Les options ligne de commande prévalent sur ce fichier.
+
+[output]
+dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"   # défaut : même dossier que Ventes.pdf
+format  = "png"                               # png (défaut), pdf, md, txt
+# nom     = "mon_fichier"                       # sans extension ; défaut : YYYY_SNN_feuille_paniers_amap
