@@ -23,6 +23,7 @@ import io
 from pathlib import Path
 from collections import defaultdict
 import itertools
+from datetime import datetime, timedelta
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
@@ -55,7 +56,22 @@ def fmt(val):
     return f"{val:.2f}".rstrip('0').rstrip('.')
 
 
-# ── Extraction PDF ────────────────────────────────────────────────────────────
+def prefixe_semaine(date_str):
+    """
+    Calcule le préfixe YYYY_SNN à partir d'une date de panier DD/MM/YYYY.
+    La distribution a lieu le mercredi suivant (ou le jour même si c'est mercredi).
+    """
+    try:
+        d = datetime.strptime(date_str, '%d/%m/%Y')
+        jours = (2 - d.weekday()) % 7   # 0 si mercredi, sinon jours jusqu'au prochain
+        mercredi = d + timedelta(days=jours)
+        annee, semaine, _ = mercredi.isocalendar()
+        return f"{annee}_S{semaine:02d}"
+    except Exception:
+        return None
+
+
+# ── Extraction PDF ─────────────────────────────────────────────────────────────
 
 def extract_date_from_page2(pdf_path):
     """Retourne la date de retrait (DD/MM/YYYY) depuis la page 2, ou None."""
@@ -275,6 +291,12 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
 
     HDR_Y       = PAGE_H - MARGIN_TOP - HDR_H
     available_h = HDR_Y - MARGIN
+
+    # Hauteur de ligne : on prend le max entre :
+    #  - la hauteur minimale (S + 12)
+    #  - la hauteur disponible divisée par le nombre de lignes
+    # Puis on s'assure que chaque ligne est assez haute pour son contenu (wrap).
+    # Le centrage vertical dans draw_prod est borné à la hauteur de la case.
     ROW_H       = max(ROW_H_MIN, available_h / max(len(rows), 1))
 
     # Fond blanc
@@ -299,13 +321,14 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
         c.line(xs, HDR_Y, xs, HDR_Y + HDR_H)   # séparateurs verticaux
 
     # Lignes de données
-    def wrap_prod(text, max_w):
+    def wrap_prod(text, max_w, s=None):
         """Découpe le nom produit en lignes sans couper les mots."""
+        if s is None: s = S
         words = text.split()
         lines, cur = [], ''
         for w in words:
             t = (cur + ' ' + w).strip()
-            if c.stringWidth(t, FONT, S) <= max_w:
+            if c.stringWidth(t, FONT, s) <= max_w:
                 cur = t
             else:
                 if cur: lines.append(cur)
@@ -314,10 +337,17 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
         return lines
 
     def draw_prod(text, rb, row_h, max_w):
-        c.setFont(FONT, S)
-        lines  = wrap_prod(text, max_w)
-        line_h = S * 1.3
-        y_top  = rb + row_h / 2 + len(lines) * line_h / 2 - S
+        # Réduire la police si le bloc wrappé dépasse la hauteur de la case
+        s = S
+        while s >= 7:
+            lines  = wrap_prod(text, max_w, s)
+            line_h = s * 1.3
+            if line_h * len(lines) <= row_h - 4:
+                break
+            s -= 0.5
+        c.setFont(FONT, s)
+        line_h = s * 1.3
+        y_top  = rb + row_h / 2 + len(lines) * line_h / 2 - s
         for i, line in enumerate(lines):
             c.drawString(xP + 4, y_top - i * line_h, line)
 
@@ -422,14 +452,15 @@ def transformer(input_path, output_path=None, fmt_out='png',
         if ext in ('pdf', 'png', 'md', 'txt'):
             fmt_out = ext
 
-    # Nom de sortie par défaut
-    if not output_path:
-        output_path = input_path.parent / (SORTIE + '.' + fmt_out)
-    output_path = Path(output_path)
-
     print(f"Lecture de : {input_path}")
     titre = extract_date_from_page2(input_path) or "Ventes"
     print(f"  Date : {titre}")
+
+    # Nom de sortie par défaut (nécessite le titre pour le préfixe semaine)
+    if not output_path:
+        prefix = prefixe_semaine(titre) or 'inconnu'
+        output_path = input_path.parent / f"{prefix}_{SORTIE}.{fmt_out}"
+    output_path = Path(output_path)
 
     rows, paniers = extract_table_data(input_path)
     if not paniers:
