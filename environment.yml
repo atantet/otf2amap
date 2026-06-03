@@ -3,6 +3,12 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - pdfplumber
-  - pypdf
-  - reportlab
+  - python >=3.11      # tomllib intégré (lecture de config.toml)
+  - pdfplumber         # extraction du texte PDF
+  - pypdf              # lecture/écriture PDF
+  - reportlab          # génération du PDF de sortie
+  - pdf2image          # conversion PDF → PNG (format de sortie par défaut)
+  - poppler            # binaire requis par pdf2image (pdftoppm)
+  # Outils de développement
+  - pytest             # batterie de tests
+  - ruff               # lint + formatage

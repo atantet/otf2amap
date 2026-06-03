@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "otf2amap"
+version = "1.0.0"
+description = "Convertit un PDF de ventes OuvreTaFerme en feuille de préparation des paniers AMAP"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Alexis Tantet" }]
+dependencies = [
+    "pdfplumber",
+    "pypdf",
+    "reportlab",
+    "pdf2image",   # sortie PNG (nécessite poppler installé sur le système)
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+otf2amap = "otf2amap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# E501 : on tolère quelques lignes longues (tableaux de constantes alignés)
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# src/ en tête de sys.path pour que le package l'emporte sur le shim otf2amap.py
+pythonpath = ["src"]

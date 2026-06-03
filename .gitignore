@@ -3,6 +3,11 @@
 
 IA/*
 
+# PDFs source d'exemple et feuilles générées (non versionnés)
+exemples/
+feuilles/
+*feuille_paniers_amap.*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
