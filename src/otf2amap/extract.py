@@ -25,6 +25,39 @@ def extract_date_from_page2(pdf_path):
     return m.group(1) if m else None
 
 
+# Clés de paniers reconnues et leur ordre d'affichage (partagé page 1 / page 2).
+PANIER_KEYS = [('petit', 'Petit'), ('moyen', 'Moyen'), ('grand', 'Grand')]
+PANIER_ORDER = {'petit': 0, 'moyen': 1, 'grand': 2}
+
+
+def extract_paniers_from_page2(pdf_path):
+    """
+    Extrait la liste des paniers depuis la page 2, dont l'en-tête porte
+    toujours le nombre de paniers, quel que soit le format d'export :
+        'Panier de la semaine - moyen 7 u. 107,10 €'  → {key:'moyen', n:7}
+    Sert de repli quand la page 1 (format détaillé) ne porte pas ce nombre.
+    Retourne la liste {key, label, n} triée petit/moyen/grand.
+    """
+    with pdfplumber.open(pdf_path) as pdf:
+        if len(pdf.pages) < 2:
+            return []
+        text = pdf.pages[1].extract_text() or ''
+
+    paniers = []
+    for line in text.splitlines():
+        m = re.search(r'Panier de la semaine\s*-\s*(\w+)\s+(\d+(?:\.\d+)?)',
+                      line, re.IGNORECASE)
+        if not m:
+            continue
+        key = m.group(1).lower()
+        label = next((lbl for k, lbl in PANIER_KEYS if k == key), None)
+        if label:
+            paniers.append({'key': key, 'label': label, 'n': int(float(m.group(2)))})
+
+    paniers.sort(key=lambda p: PANIER_ORDER.get(p['key'], 99))
+    return paniers
+
+
 def extract_page2_quantities(pdf_path, paniers):
     """
     Extrait depuis la page 2 les quantités par panier pour chaque produit.
@@ -107,6 +140,11 @@ def parse_page1(pdf_path):
     X_MON_START = 252.0
     X_MON_END   = 297.0
     X_CMD_START = 297.0
+    # Format détaillé (OuvreTaFerme récent) : sous chaque en-tête "Panier de la
+    # semaine - X" (nom à x≈33), la composition du panier est listée en retrait
+    # (x≈53). Les vrais produits restent à x≈19. On ignore donc toute ligne dont
+    # le nom de produit commence au-delà de ce seuil : c'est du détail de panier.
+    X_INDENT = 45.0
 
     with pdfplumber.open(pdf_path) as pdf:
         words = pdf.pages[0].extract_words(x_tolerance=3, y_tolerance=3)
@@ -128,6 +166,8 @@ def parse_page1(pdf_path):
     for y in sorted(by_y.keys()):
         ws = by_y[y]
         prod_ws = [w for w in ws if w['x0'] < X_PROD_END]
+        if prod_ws and min(w['x0'] for w in prod_ws) > X_INDENT:
+            continue  # ligne de composition d'un panier (format détaillé) : ignorée
         if has_qty_col:
             segs.append({'y': y,
                          'prod': txt(prod_ws),
@@ -213,8 +253,6 @@ def parse_page1(pdf_path):
             rows_raw.append(row)
 
     # Séparer paniers et produits
-    PANIER_KEYS = [('petit', 'Petit'), ('moyen', 'Moyen'), ('grand', 'Grand')]
-    ORDER = {'petit': 0, 'moyen': 1, 'grand': 2}
     paniers, rows = [], []
 
     for r in rows_raw:
@@ -228,6 +266,6 @@ def parse_page1(pdf_path):
         else:
             rows.append(r)
 
-    paniers.sort(key=lambda p: ORDER.get(p['key'], 99))
+    paniers.sort(key=lambda p: PANIER_ORDER.get(p['key'], 99))
 
     return rows, paniers
