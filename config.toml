@@ -6,3 +6,4 @@
 dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"   # défaut : même dossier que Ventes.pdf
 format  = "png"                               # png (défaut), pdf, md, txt
 # nom     = "mon_fichier"                       # sans extension ; défaut : YYYY_SNN_feuille_paniers_amap
+drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Google Drive via rclone (voir README)

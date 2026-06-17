@@ -1,4 +1,4 @@
-"""Lecture de config.toml ([output] dossier / format / nom)."""
+"""Lecture de config.toml ([output] dossier / format / nom / drive_remote)."""
 
 import sys
 from pathlib import Path
@@ -33,7 +33,8 @@ def load_config(config_path=None):
     courant. Erreur si aucun fichier n'est trouvé (toutes les clés restent
     optionnelles, mais le fichier doit exister).
 
-    Retourne un dict avec les clés présentes parmi : dossier, format, nom.
+    Retourne un dict avec les clés présentes parmi : dossier, format, nom,
+    drive_remote.
     """
     config_path = Path(config_path) if config_path else find_config()
     if not config_path or not config_path.exists():

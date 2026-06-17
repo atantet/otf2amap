@@ -12,9 +12,10 @@ Formats de sortie (défaut : PNG) :
 
 Configuration (config.toml cherché depuis le dossier courant) :
   [output]
-  dossier = "/chemin/vers/dossier"   # dossier de sortie
-  format  = "png"                    # format de sortie
-  nom     = "mon_fichier"            # nom sans extension (remplace le nom par défaut)
+  dossier      = "/chemin/vers/dossier"  # dossier de sortie
+  format       = "png"                   # format de sortie
+  nom          = "mon_fichier"           # nom sans extension (remplace le défaut)
+  drive_remote = "gdrive:AMAP/feuilles"  # envoi via rclone (optionnel)
 
 Les options ligne de commande prévalent sur config.toml.
 config.toml doit exister ; ses variables sont toutes optionnelles.
@@ -29,6 +30,7 @@ from .extract import extract_date_from_page2
 from .naming import SORTIE, prefixe_semaine
 from .render import write_pdf, write_png
 from .text import build_text_table
+from .upload import upload_to_remote
 
 FORMATS = ('png', 'pdf', 'md', 'txt')
 
@@ -77,6 +79,7 @@ def transformer(input_path, output_path=None, fmt_out='png',
         output_path.write_text(build_text_table(rows, paniers, titre, mode='txt'), encoding='utf-8')
 
     print(f"Fichier enregistré : {output_path}")
+    return output_path
 
 
 def _resolve_output_path(input_path, output_cli, cfg, fmt_out):
@@ -150,8 +153,13 @@ def main(argv=None):
     if not _ensure_out_dir(output_path, input_path):
         return 0
 
-    transformer(input_path, output_path,
-                fmt_out=fmt_out, avec_montant=avec_montant, scale=scale)
+    final_path = transformer(input_path, output_path,
+                             fmt_out=fmt_out, avec_montant=avec_montant, scale=scale)
+
+    # Envoi optionnel vers Google Drive (ou tout remote rclone)
+    remote = cfg.get('drive_remote')
+    if remote:
+        upload_to_remote(final_path, remote)
     return 0
 
 
