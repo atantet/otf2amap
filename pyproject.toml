@@ -14,7 +14,9 @@ dependencies = [
     "pdfplumber",
     "pypdf",
     "reportlab",
-    "pdf2image",   # sortie PNG (nécessite poppler installé sur le système)
+    "pdf2image",     # sortie PNG (nécessite poppler installé sur le système)
+    "xlrd",          # lecture des tableurs .xls AmapJ (mail2amap)
+    "python-dotenv", # chargement des identifiants IMAP depuis .env (mail2amap)
 ]
 
 [project.optional-dependencies]
@@ -22,6 +24,7 @@ dev = ["pytest", "ruff"]
 
 [project.scripts]
 otf2amap = "otf2amap.cli:main"
+mail2amap = "otf2amap.mailcli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

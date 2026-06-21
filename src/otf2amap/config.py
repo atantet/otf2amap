@@ -46,3 +46,21 @@ def load_config(config_path=None):
     with open(config_path, 'rb') as f:
         data = tomllib.load(f)
     return data.get('output', {})
+
+
+def load_mail_config(config_path=None):
+    """Charge la section [mail] de config.toml (expediteur, objet_motif, dossier_base).
+
+    Mêmes règles que load_config : le fichier doit exister, ses clés sont
+    optionnelles. Retourne {} si la section est absente.
+    """
+    config_path = Path(config_path) if config_path else find_config()
+    if not config_path or not config_path.exists():
+        print("ERREUR : config.toml introuvable (cherché depuis le dossier courant)")
+        sys.exit(1)
+    if tomllib is None:
+        print("ERREUR : pip install tomli pour lire config.toml (Python < 3.11)")
+        sys.exit(1)
+    with open(config_path, 'rb') as f:
+        data = tomllib.load(f)
+    return data.get('mail', {})

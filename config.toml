@@ -7,3 +7,11 @@ dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"
 format  = "png"                               # png (défaut), pdf, md, txt
 # nom     = "mon_fichier"                       # sans extension ; défaut : YYYY_SNN_feuille_paniers_amap
 drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Google Drive via rclone (voir README)
+
+# Récupération des tableurs de distribution par mail (commande `mail2amap`).
+# Les identifiants IMAP (hôte / adresse / mot de passe d'application) ne sont
+# JAMAIS ici : ils vivent dans .env (gitignoré). Voir .env.example.
+[mail]
+expediteur   = "saint-malo@m.amapj.fr"     # adresse émettrice à filtrer
+objet_motif  = "Feuille de livraison"      # l'objet du mail doit contenir ce motif
+# dossier_base = "~/Documents/.../AMAP"    # où créer <année>/S<semaine>/ ; défaut : dossier parent du dépôt

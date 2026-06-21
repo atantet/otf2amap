@@ -31,6 +31,66 @@ python3 otf2amap.py Ventes.pdf      # lanceur de compatibilité (sans installati
 python3 -m otf2amap Ventes.pdf
 ```
 
+## En amont : récupérer les tableurs par mail (`mail2amap`)
+
+AmapJ envoie chaque semaine, sur la boîte Gmail de l'AMAP, un mail par contrat
+(Légumes, Pain, …) avec le tableur de distribution en pièce jointe. La commande
+`mail2amap` télécharge ces pièces jointes et affiche le nombre de paniers de
+légumes par type — ce qui sert à créer la vente sur OuvreTaFerme, dont l'export
+PDF est ensuite passé à `otf2amap`.
+
+```bash
+mail2amap                      # dernière livraison reçue (défaut)
+mail2amap --tout               # toutes les livraisons trouvées dans la boîte
+mail2amap --date 24/06/2026    # une livraison précise
+```
+
+Pour une même livraison, AmapJ envoie **un mail par contrat** (Légumes, Pain,
+Pommes, Poires…) avec un objet et un expéditeur **identiques** : seul le corps
+du mail (`Nom du contrat : …`) distingue les contrats. `mail2amap` lit donc le
+corps pour identifier le contrat de chaque mail.
+
+Les mails sont filtrés sur l'expéditeur **et** le motif d'objet ; la date de
+livraison est lue dans l'objet (« … du mercredi 24 juin 2026 ») et les pièces
+jointes sont enregistrées dans `<dossier_base>/<année>/S<semaine>/` (semaine ISO,
+ex. `…/2026/S26/`). Le tableur du contrat **Légumes** est ensuite lu et le
+cumul affiché :
+
+```
+Livraison du 24/06/2026 — Légumes (avril 2026 à fin septembre 2026) → …/2026/S26
+  téléchargé : distri-Légumes (…)-24-06-2026.xls
+  Légumes — paniers à livrer :
+    petit : 12
+    moyen : 7
+    grand : 0
+
+Livraison du 24/06/2026 — Pain (avril 2026 - septembre 2026) → …/2026/S26
+  téléchargé : distri-Pain (…)-24-06-2026.xls
+```
+
+### Configuration
+
+Partie non secrète dans `config.toml` :
+
+```toml
+[mail]
+expediteur   = "saint-malo@m.amapj.fr"   # adresse émettrice à filtrer
+objet_motif  = "Feuille de livraison"    # l'objet du mail doit le contenir
+# dossier_base = "~/…/AMAP"              # défaut : dossier parent du dépôt
+```
+
+Identifiants IMAP **jamais versionnés** : ils vivent dans `.env` (gitignoré).
+Copier `.env.example` en `.env` et renseigner un **mot de passe d'application**
+Gmail (16 caractères, dédié et révocable — pas le mot de passe du compte) :
+
+```bash
+cp .env.example .env
+# puis remplir AMAP_IMAP_USER / AMAP_IMAP_PASSWORD
+```
+
+Obtention du mot de passe d'application : activer la validation en 2 étapes du
+compte Google, puis le générer sur <https://myaccount.google.com/apppasswords>.
+
 - `Ventes.pdf` : PDF exporté depuis OuvreTaFerme (2 pages)
 - `sortie` : optionnel ; par défaut `YYYY_SNN_feuille_paniers_amap.<format>`
 - `--montant` : ajoute une colonne MONTANT
@@ -96,9 +156,13 @@ src/otf2amap/
   allocate.py   attribution des quantités aux paniers
   render.py     rendu PDF / PNG
   text.py       rendu Markdown / txt
-  config.py     lecture de config.toml
+  config.py     lecture de config.toml ([output] et [mail])
   naming.py     nommage par défaut (préfixe semaine ISO)
-  cli.py        arguments et orchestration
+  cli.py        arguments et orchestration (otf2amap)
+  mailbox.py    récupération IMAP, date (objet) et contrat (corps) des mails
+  mailenv.py    identifiants IMAP depuis .env (jamais versionné)
+  legumes.py    comptage des paniers dans le tableur .xls AmapJ
+  mailcli.py    arguments et orchestration (mail2amap)
 otf2amap.py     lanceur de compatibilité
 tests/          batterie de tests (unitaires + intégration)
 notes/          notes de travail

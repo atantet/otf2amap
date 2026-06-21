@@ -1,7 +1,11 @@
 """Tests unitaires des briques pures (sans PDF)."""
 
+from datetime import datetime
+from email.message import EmailMessage
+
 from otf2amap.allocate import allocate, match_produit
 from otf2amap.extract import parse_raw_cmd
+from otf2amap.mailbox import extract_contrat, parse_date_livraison
 from otf2amap.naming import prefixe_semaine
 from otf2amap.text import build_text_table
 from otf2amap.util import clean, fmt
@@ -31,6 +35,74 @@ def test_prefixe_semaine():
 def test_prefixe_semaine_invalide():
     assert prefixe_semaine("pas une date") is None
     assert prefixe_semaine(None) is None
+
+
+# ── mailbox.parse_date_livraison ──────────────────────────────────────────────
+
+def test_parse_date_livraison_objet_amapj():
+    # objet réel AmapJ, avec jour de semaine
+    s = "AMAP du Bocage - Feuille de livraison du mercredi 24 juin 2026"
+    assert parse_date_livraison(s) == datetime(2026, 6, 24)
+
+
+def test_parse_date_livraison_sans_jour_de_semaine_et_accents():
+    assert parse_date_livraison("… du 17 juin 2026") == datetime(2026, 6, 17)
+    assert parse_date_livraison("… du mercredi 5 août 2026") == datetime(2026, 8, 5)
+
+
+def test_parse_date_livraison_invalide():
+    assert parse_date_livraison("pas de date") is None
+    assert parse_date_livraison("le 32 juin 2026") is None
+    assert parse_date_livraison(None) is None
+
+
+# ── mailbox.extract_contrat ───────────────────────────────────────────────────
+
+def _mail(corps):
+    msg = EmailMessage()
+    msg["From"] = "saint-malo@m.amapj.fr"
+    msg["Subject"] = "AMAP du Bocage - Feuille de livraison du mercredi 25 février 2026"
+    msg.set_content(corps)
+    return msg
+
+
+_CORPS_LEGUMES = """AMAP du Bocage-Saint Malo
+
+Bonjour ,
+
+Vous trouverez ci joint la feuille de livraison pour le mercredi 25 février 2026
+
+Nom du contrat : Légumes (octobre 2025 - mars 2026)
+Nom du producteur : EARL La Petite Claye des champs (légumes)
+"""
+
+_CORPS_POMMES = _CORPS_LEGUMES.replace(
+    "Légumes (octobre 2025 - mars 2026)", "Pommes (octobre 2025 à mars 2026)"
+)
+
+
+def test_extract_contrat_distingue_les_contrats():
+    # objet + expéditeur identiques : seul le corps distingue les contrats
+    assert extract_contrat(_mail(_CORPS_LEGUMES)) == "Légumes (octobre 2025 - mars 2026)"
+    assert extract_contrat(_mail(_CORPS_POMMES)) == "Pommes (octobre 2025 à mars 2026)"
+
+
+def test_extract_contrat_absent():
+    assert extract_contrat(_mail("Bonjour, pas de ligne contrat ici.")) is None
+
+
+def test_mail_transfere_manuellement():
+    # Transfert manuel : objet préfixé « Tr: », corps original cité.
+    sujet = "Tr: AMAP du Bocage - Feuille de livraison du mercredi 25 février 2026"
+    corps = (
+        "---------- Message transféré ----------\n"
+        "De : AMAP du Bocage <saint-malo@m.amapj.fr>\n"
+        "Objet : Feuille de livraison du mercredi 25 février 2026\n\n"
+        "Vous trouverez ci joint la feuille de livraison pour le mercredi 25 février 2026\n"
+        "Nom du contrat : Légumes (octobre 2025 - mars 2026)\n"
+    )
+    assert parse_date_livraison(sujet) == datetime(2026, 2, 25)
+    assert extract_contrat(_mail(corps)) == "Légumes (octobre 2025 - mars 2026)"
 
 
 # ── extract.parse_raw_cmd ─────────────────────────────────────────────────────
