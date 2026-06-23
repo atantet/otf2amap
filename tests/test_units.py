@@ -4,7 +4,7 @@ from datetime import datetime
 from email.message import EmailMessage
 
 from otf2amap.allocate import allocate, match_produit
-from otf2amap.extract import parse_raw_cmd
+from otf2amap.extract import cle_tri_produit, parse_raw_cmd
 from otf2amap.legumes import renommer_avec_paniers
 from otf2amap.mailbox import extract_contrat, parse_date_livraison
 from otf2amap.naming import prefixe_semaine
@@ -129,6 +129,38 @@ def test_parse_raw_cmd_layout_b():
 
 def test_parse_raw_cmd_sans_correspondance():
     assert parse_raw_cmd("texte libre") == ("", "", "texte libre")
+
+
+# ── extract.cle_tri_produit ───────────────────────────────────────────────────
+
+def test_cle_tri_produit_regroupe_les_calibres():
+    # Cas réel de la feuille : le tri alphabétique brut sépare « Chou » de
+    # « Demi chou » ; la clé doit les rendre consécutifs, calibre standard avant.
+    produits = [
+        "Aubergine",
+        "Chou nouveau à l'unité / Pointu",
+        "Concombre à l'unité / Court lisse",
+        "Concombre petit à l'unité / Court lisse",
+        "Courgette petite / Verte",
+        "Demi chou nouveau à l'unité / Pointu",
+        "Oignon en botte",
+        "Oignon en petite botte",
+        "Salade à l'unité / Oreille du diable",
+        "Salade petite à l'unité / Oreille du diable",
+    ]
+    ordonne = sorted(produits, key=cle_tri_produit)
+    assert ordonne == [
+        "Aubergine",
+        "Chou nouveau à l'unité / Pointu",
+        "Demi chou nouveau à l'unité / Pointu",
+        "Concombre à l'unité / Court lisse",
+        "Concombre petit à l'unité / Court lisse",
+        "Courgette petite / Verte",
+        "Oignon en botte",
+        "Oignon en petite botte",
+        "Salade à l'unité / Oreille du diable",
+        "Salade petite à l'unité / Oreille du diable",
+    ]
 
 
 # ── allocate ──────────────────────────────────────────────────────────────────

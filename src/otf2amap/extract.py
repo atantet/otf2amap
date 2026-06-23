@@ -29,6 +29,26 @@ def extract_date_from_page2(pdf_path):
 PANIER_KEYS = [('petit', 'Petit'), ('moyen', 'Moyen'), ('grand', 'Grand')]
 PANIER_ORDER = {'petit': 0, 'moyen': 1, 'grand': 2}
 
+# Qualificatifs de calibre à ignorer pour regrouper les variantes d'un légume.
+CALIBRES = frozenset(('demi', 'petit', 'petite', 'gros', 'grosse',
+                      'grand', 'grande', 'moyen', 'moyenne'))
+
+
+def cle_tri_produit(prod):
+    """Clé de tri regroupant les calibres d'un même légume (noms inchangés).
+
+    Le tri alphabétique brut d'OuvreTaFerme éloigne deux calibres d'un même
+    légume (« Chou … » vs « Demi chou … », « Concombre … » vs « Concombre
+    petit … »). On trie sur le nom de base (partie avant « / »), débarrassé des
+    qualificatifs de calibre, ce qui rend les variantes consécutives. Au sein
+    d'un groupe : d'abord le calibre standard (sans qualificatif), puis le nom
+    complet pour un ordre stable.
+    """
+    base = prod.split('/', 1)[0].lower()
+    tokens = re.findall(r"[\w'’]+", base)
+    mots = [m for m in tokens if m not in CALIBRES]
+    return (' '.join(mots), len(tokens) - len(mots), prod.lower())
+
 
 def extract_paniers_from_page2(pdf_path):
     """
@@ -267,5 +287,6 @@ def parse_page1(pdf_path):
             rows.append(r)
 
     paniers.sort(key=lambda p: PANIER_ORDER.get(p['key'], 99))
+    rows.sort(key=lambda r: cle_tri_produit(r['prod']))
 
     return rows, paniers
