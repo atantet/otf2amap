@@ -9,6 +9,8 @@ Le tableur exporté par AmapJ a, sur sa première feuille :
 type. C'est ce nombre qui sert à créer la vente sur OuvreTaFerme en amont.
 """
 
+from pathlib import Path
+
 import xlrd
 
 TYPES = ("petit", "moyen", "grand")
@@ -58,3 +60,17 @@ def compter_paniers(xls_path):
 
     return {t: _to_int(sheet.cell_value(cumul_row, col_par_type[t])) if t in col_par_type else 0
             for t in TYPES}
+
+
+def renommer_avec_paniers(path, paniers):
+    """Ajoute le postfixe « _<petit>_<moyen>_<grand> » avant l'extension.
+
+    Ex. « distri-Légumes-24-06-2026.xls » → « distri-Légumes-24-06-2026_14_8_0.xls ».
+    Renvoie le nouveau chemin (inchangé si le renommage est sans effet).
+    """
+    path = Path(path)
+    postfix = "_" + "_".join(str(paniers[t]) for t in TYPES)
+    cible = path.with_name(path.stem + postfix + path.suffix)
+    if cible != path:
+        path.rename(cible)
+    return cible

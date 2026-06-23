@@ -43,7 +43,17 @@ PDF est ensuite passé à `otf2amap`.
 mail2amap                      # dernière livraison reçue (défaut)
 mail2amap --tout               # toutes les livraisons trouvées dans la boîte
 mail2amap --date 24/06/2026    # une livraison précise
+mail2amap --fichier            # recompte un tableur déjà téléchargé, SANS mail
+mail2amap --fichier chemin/legumes.xls   # … un fichier précis
+mail2amap --fichier --date 24/06/2026    # … le tableur Légumes de cette semaine
 ```
+
+À chaque téléchargement, le tableur Légumes est renommé avec le nombre de
+paniers en suffixe (`…-24-06-2026_14_8_0.xls` = 14 petits, 8 moyens, 0 grands),
+ce qui rend le compte visible directement dans le nom de fichier. L'option
+`--fichier` relit un tableur déjà présent sans se connecter au mail : avec un
+chemin explicite, ou (sans argument) le tableur Légumes de la semaine `--date`,
+ou à défaut celui de la semaine la plus récente trouvée sous `dossier_base`.
 
 Pour une même livraison, AmapJ envoie **un mail par contrat** (Légumes, Pain,
 Pommes, Poires…) avec un objet et un expéditeur **identiques** : seul le corps

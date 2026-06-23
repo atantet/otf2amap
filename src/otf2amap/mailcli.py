@@ -11,6 +11,10 @@ Usage :
     mail2amap --date 24/06/2026          # une livraison précise
     mail2amap --expediteur addr@x.fr     # surcharge l'expéditeur à filtrer
                                          #   (ex. mail transféré : From = qui transfère)
+    mail2amap --fichier                  # compte les paniers d'un tableur déjà
+                                         #   téléchargé, SANS se connecter au mail
+    mail2amap --fichier chemin/legumes.xls   # … d'un fichier précis
+    mail2amap --fichier --date 24/06/2026    # … du tableur Légumes de cette semaine
 
 Configuration :
   - config.toml [mail] : expediteur, objet_motif, dossier_base (non secrets)
@@ -23,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import load_mail_config
-from .legumes import compter_paniers
+from .legumes import compter_paniers, renommer_avec_paniers
 from .mailbox import connect, find_distributions, save_attachments
 from .mailenv import REPO_ROOT, ConfigError, load_imap_secrets
 from .naming import prefixe_semaine
@@ -40,6 +44,29 @@ def _est_legumes(texte):
     """Vrai si `texte` (nom de contrat ou de fichier) désigne le contrat Légumes."""
     t = (texte or "").lower()
     return "légume" in t or "legume" in t
+
+
+def _trouver_legumes_local(base, date_cible):
+    """Cherche un tableur Légumes déjà téléchargé. Renvoie un Path ou None.
+
+    Avec --date : dans le dossier de la semaine correspondante ; sinon dans le
+    dossier de semaine le plus récent présent sous `base`.
+    """
+    base = Path(base).expanduser()
+    if date_cible is not None:
+        dossiers = [_dossier_semaine(date_cible, base)]
+    else:
+        dossiers = sorted(
+            (d for annee in base.glob("[0-9][0-9][0-9][0-9]") if annee.is_dir()
+               for d in annee.glob("S[0-9]*") if d.is_dir()),
+            reverse=True,
+        )
+    for dossier in dossiers:
+        for motif in ("*[Ll]égume*.xls", "*[Ll]egume*.xls"):
+            trouves = sorted(dossier.glob(motif))
+            if trouves:
+                return trouves[0]
+    return None
 
 
 def _selectionner(distributions, tout, date_cible):
@@ -59,10 +86,16 @@ def _selectionner(distributions, tout, date_cible):
 
 
 def _parse_args(argv):
-    """Retourne (tout: bool, date_cible: datetime|None). Quitte sur --help/erreur."""
+    """Retourne (tout, date_cible, expediteur, fichier_mode, fichier_path).
+
+    fichier_mode : True si --fichier est présent ; fichier_path : chemin explicite
+    donné après --fichier, ou None (→ chemin par défaut). Quitte sur erreur.
+    """
     tout = "--tout" in argv
     date_cible = None
     expediteur = None
+    fichier_mode = False
+    fichier_path = None
     for i, a in enumerate(argv):
         if a == "--date" and i + 1 < len(argv):
             try:
@@ -72,7 +105,11 @@ def _parse_args(argv):
                 sys.exit(1)
         elif a == "--expediteur" and i + 1 < len(argv):
             expediteur = argv[i + 1]
-    return tout, date_cible, expediteur
+        elif a == "--fichier":
+            fichier_mode = True
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+                fichier_path = argv[i + 1]
+    return tout, date_cible, expediteur, fichier_mode, fichier_path
 
 
 def main(argv=None):
@@ -81,7 +118,7 @@ def main(argv=None):
         print(__doc__)
         return 0
 
-    tout, date_cible, expediteur_cli = _parse_args(argv)
+    tout, date_cible, expediteur_cli, fichier_mode, fichier_path = _parse_args(argv)
 
     cfg = load_mail_config()
     # --expediteur surcharge la config (utile pour un mail transféré manuellement,
@@ -89,6 +126,10 @@ def main(argv=None):
     expediteur = expediteur_cli or cfg.get("expediteur", "saint-malo@m.amapj.fr")
     objet_motif = cfg.get("objet_motif", "Feuille de livraison")
     base = cfg.get("dossier_base") or str(REPO_ROOT.parent)
+
+    # --fichier : compte les paniers d'un tableur déjà téléchargé, sans IMAP.
+    if fichier_mode:
+        return _mode_local(fichier_path, date_cible, base)
 
     try:
         secrets = load_imap_secrets()
@@ -131,18 +172,41 @@ def main(argv=None):
         if _est_legumes(contrat) or any(_est_legumes(c.name) for c in chemins):
             for c in chemins:
                 if c.suffix.lower() == ".xls" and (_est_legumes(contrat) or _est_legumes(c.name)):
-                    _afficher_legumes(c)
+                    _traiter_legumes(c, renommer=True)
 
     return 0
 
 
-def _afficher_legumes(chemin):
-    """Lit le tableur Légumes et imprime les nombres de paniers par type."""
+def _mode_local(fichier_path, date_cible, base):
+    """Compte les paniers d'un tableur déjà téléchargé, sans connexion IMAP."""
+    if fichier_path:
+        chemin = Path(fichier_path).expanduser()
+    else:
+        chemin = _trouver_legumes_local(base, date_cible)
+        if chemin is None:
+            ou = (f"la semaine du {date_cible:%d/%m/%Y}" if date_cible
+                  else f"sous {Path(base).expanduser()}")
+            print(f"Aucun tableur Légumes trouvé localement ({ou}).")
+            return 1
+    if not chemin.exists():
+        print(f"ERREUR : fichier introuvable : {chemin}")
+        return 1
+    print(f"Lecture du tableur Légumes : {chemin}")
+    _traiter_legumes(chemin)
+    return 0
+
+
+def _traiter_legumes(chemin, renommer=False):
+    """Lit le tableur Légumes, imprime les paniers ; renomme le fichier si demandé."""
     try:
         paniers = compter_paniers(chemin)
     except Exception as e:                                    # robustesse lecture xls
         print(f"  ERREUR lecture Légumes ({chemin.name}) : {e}")
         return
+    if renommer:
+        nouveau = renommer_avec_paniers(chemin, paniers)
+        if nouveau.name != chemin.name:
+            print(f"  renommé : {nouveau.name}")
     print("  Légumes — paniers à livrer :")
     print(f"    petit : {paniers['petit']}")
     print(f"    moyen : {paniers['moyen']}")

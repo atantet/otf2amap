@@ -5,6 +5,7 @@ from email.message import EmailMessage
 
 from otf2amap.allocate import allocate, match_produit
 from otf2amap.extract import parse_raw_cmd
+from otf2amap.legumes import renommer_avec_paniers
 from otf2amap.mailbox import extract_contrat, parse_date_livraison
 from otf2amap.naming import prefixe_semaine
 from otf2amap.text import build_text_table
@@ -103,6 +104,17 @@ def test_mail_transfere_manuellement():
     )
     assert parse_date_livraison(sujet) == datetime(2026, 2, 25)
     assert extract_contrat(_mail(corps)) == "Légumes (octobre 2025 - mars 2026)"
+
+
+# ── legumes.renommer_avec_paniers ─────────────────────────────────────────────
+
+def test_renommer_avec_paniers_ajoute_le_postfixe(tmp_path):
+    src = tmp_path / "distri-Légumes-24-06-2026.xls"
+    src.write_bytes(b"contenu")
+    cible = renommer_avec_paniers(src, {"petit": 14, "moyen": 8, "grand": 0})
+    assert cible.name == "distri-Légumes-24-06-2026_14_8_0.xls"
+    assert cible.exists() and not src.exists()
+    assert cible.read_bytes() == b"contenu"
 
 
 # ── extract.parse_raw_cmd ─────────────────────────────────────────────────────
