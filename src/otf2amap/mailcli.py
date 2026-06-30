@@ -22,6 +22,7 @@ Configuration :
                          (voir .env.example ; jamais versionné)
 """
 
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,18 @@ def _dossier_semaine(date_livraison, base):
     prefixe = prefixe_semaine(date_livraison.strftime("%d/%m/%Y"))   # ex. "2026_S26"
     annee, semaine = prefixe.split("_")                              # "2026", "S26"
     return Path(base).expanduser() / annee / semaine
+
+
+_CONTRAT_PJ_RE = re.compile(r"distri-(.+?)\s*\(", re.IGNORECASE)
+
+
+def _contrat_depuis_pj(chemins):
+    """Nom du contrat extrait du nom d'une pièce jointe (« distri-<Nom> (…) »)."""
+    for c in chemins:
+        m = _CONTRAT_PJ_RE.match(c.name)
+        if m:
+            return m.group(1).strip()
+    return None
 
 
 def _est_legumes(texte):
@@ -161,6 +174,7 @@ def main(argv=None):
             continue
         dossier = _dossier_semaine(date_livraison, base)
         chemins = save_attachments(d["message"], dossier)
+        contrat = contrat or _contrat_depuis_pj(chemins)
         libelle = contrat or "contrat inconnu"
         print(f"\nLivraison du {date_livraison:%d/%m/%Y} — {libelle} → {dossier}")
         if not chemins:
