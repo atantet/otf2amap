@@ -213,6 +213,7 @@ def parse_page1(pdf_path):
                 and not is_header(seg['prod']))
 
     rows_raw = []
+    consumed_up_to = -1  # dernier indice absorbé par un look-ahead précédent
     i = 0
     while i < len(segs):
         s = segs[i]
@@ -228,14 +229,26 @@ def parse_page1(pdf_path):
 
         row = {'prod': s['prod'], 'qty': s['qty'], 'mon': s['mon'], 'cmd': s['cmd']}
 
-        # Chiffre sur la ligne juste avant le nom (layout A ou B)
+        # Chiffre sur la ligne juste avant le nom (layout B : quantité scindée).
+        # Si segs[i-1] a déjà été absorbé par le look-ahead du produit précédent,
+        # on ne l'applique QUE s'il s'agit d'un nombre nu (ex. "12" avant "u. 21,55 €…"),
+        # qui est un préfixe de quantité pour le produit courant.
+        # Un segment de type "1 x 3.85 kg…" est une continuation de cmd du produit
+        # précédent : dans ce cas on ne le réapplique pas.
         if i > 0:
             prev = segs[i - 1]
+            is_consumed = i - 1 <= consumed_up_to
             if not prev['prod'] and not prev['mon']:
                 if prev['qty'] and not prev['cmd']:
-                    row['qty'] = (prev['qty'] + ' ' + row['qty']).strip() if row['qty'] else prev['qty']
+                    if not is_consumed:
+                        row['qty'] = (prev['qty'] + ' ' + row['qty']).strip() if row['qty'] else prev['qty']
                 elif prev['cmd'] and not prev['qty']:
-                    row['cmd'] = (prev['cmd'] + ' ' + row['cmd']).strip() if row['cmd'] else prev['cmd']
+                    if not is_consumed:
+                        row['cmd'] = (prev['cmd'] + ' ' + row['cmd']).strip() if row['cmd'] else prev['cmd']
+                    elif (re.match(r'^[\d.]+\s*$', prev['cmd'].strip())
+                          and not re.match(r'^[\d.]+\s+\S', row['cmd'].strip())):
+                        # Nombre nu consommé mais encore nécessaire comme préfixe de quantité
+                        row['cmd'] = prev['cmd'].strip() + ' ' + row['cmd']
 
         # Compléter les champs depuis les lignes suivantes
         j = i + 1
@@ -260,7 +273,11 @@ def parse_page1(pdf_path):
                     j += 1
                 break
 
-        i = j if j > i + 1 else i + 1
+        if j > i + 1:
+            consumed_up_to = j - 1
+            i = j
+        else:
+            i = i + 1
 
         # Layout B : extraire qty et mon depuis cmd
         if not row['qty'] and row['cmd']:

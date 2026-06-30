@@ -31,15 +31,7 @@ from .config import load_mail_config
 from .legumes import compter_paniers, renommer_avec_paniers
 from .mailbox import connect, find_distributions, save_attachments
 from .mailenv import REPO_ROOT, ConfigError, load_imap_secrets
-from .naming import prefixe_semaine
-
-
-def _dossier_semaine(date_livraison, base):
-    """<base>/<année>/S<NN> à partir de la date de livraison (semaine ISO)."""
-    prefixe = prefixe_semaine(date_livraison.strftime("%d/%m/%Y"))   # ex. "2026_S26"
-    annee, semaine = prefixe.split("_")                              # "2026", "S26"
-    return Path(base).expanduser() / annee / semaine
-
+from .naming import dossier_semaine
 
 _CONTRAT_PJ_RE = re.compile(r"distri-(.+?)\s*\(", re.IGNORECASE)
 
@@ -67,7 +59,7 @@ def _trouver_legumes_local(base, date_cible):
     """
     base = Path(base).expanduser()
     if date_cible is not None:
-        dossiers = [_dossier_semaine(date_cible, base)]
+        dossiers = [dossier_semaine(date_cible, base)]
     else:
         dossiers = sorted(
             (d for annee in base.glob("[0-9][0-9][0-9][0-9]") if annee.is_dir()
@@ -172,7 +164,7 @@ def main(argv=None):
         if date_livraison is None:
             print(f"AVERTISSEMENT : date illisible dans l'objet, mail ignoré : {sujet!r}")
             continue
-        dossier = _dossier_semaine(date_livraison, base)
+        dossier = dossier_semaine(date_livraison, base)
         chemins = save_attachments(d["message"], dossier)
         contrat = contrat or _contrat_depuis_pj(chemins)
         libelle = contrat or "contrat inconnu"

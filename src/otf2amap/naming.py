@@ -1,6 +1,7 @@
 """Nommage par défaut des fichiers de sortie (préfixe semaine ISO)."""
 
 from datetime import datetime, timedelta
+from pathlib import Path
 
 SORTIE = "feuille_paniers_amap"
 
@@ -19,3 +20,10 @@ def prefixe_semaine(date_str):
         return f"{annee}_S{semaine:02d}"
     except (ValueError, TypeError):
         return None
+
+
+def dossier_semaine(date, base):
+    """<base>/<année>/S<NN> à partir d'une datetime (semaine ISO de la prochaine distribution)."""
+    prefixe = prefixe_semaine(date.strftime("%d/%m/%Y"))
+    annee, semaine = prefixe.split("_")
+    return Path(base).expanduser() / annee / semaine

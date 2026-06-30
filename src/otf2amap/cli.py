@@ -1,7 +1,10 @@
 """
 Interface ligne de commande d'otf2amap.
 
-Usage : otf2amap entree.pdf [sortie] [--montant] [--scale 1.0] [--format=png]
+Usage : otf2amap [entree.pdf] [sortie] [--montant] [--scale 1.0] [--format=png]
+
+  entree.pdf : PDF OuvreTaFerme (optionnel si [otf].dossier_base est configuré)
+               → cherche <dossier_base>/<année>/S<semaine>/Ventes.pdf selon la date du jour
 
 Formats de sortie (défaut : PNG) :
   --format=png   image PNG haute résolution (défaut)
@@ -11,6 +14,10 @@ Formats de sortie (défaut : PNG) :
   (l'extension du fichier de sortie prime sur --format)
 
 Configuration (config.toml cherché depuis le dossier courant) :
+  [otf]
+  dossier_base = "~/chemin/vers/AMAP"    # racine pour <année>/S<semaine>/Ventes.pdf
+  # nom_pdf    = "Ventes.pdf"            # nom du PDF à trouver (défaut : Ventes.pdf)
+
   [output]
   dossier      = "/chemin/vers/dossier"  # dossier de sortie
   format       = "png"                   # format de sortie
@@ -22,12 +29,13 @@ config.toml doit exister ; ses variables sont toutes optionnelles.
 """
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, load_otf_config
 from .core import build_sheet
 from .extract import extract_date_from_page2
-from .naming import SORTIE, prefixe_semaine
+from .naming import SORTIE, dossier_semaine, prefixe_semaine
 from .render import write_pdf, write_png
 from .text import build_text_table
 from .upload import upload_to_remote
@@ -99,6 +107,13 @@ def _resolve_output_path(input_path, output_cli, cfg, fmt_out):
     return str(dossier_path / f"{base}.{fmt_out}")
 
 
+def _trouver_pdf_semaine(base, date_ref, nom_pdf='Ventes.pdf'):
+    """Cherche <base>/<année>/S<semaine>/<nom_pdf> pour la date de référence."""
+    dossier = dossier_semaine(date_ref, base)
+    candidat = dossier / nom_pdf
+    return candidat if candidat.exists() else None
+
+
 def _ensure_out_dir(output_path, input_path):
     """Crée le dossier de sortie si besoin, après confirmation."""
     if output_path:
@@ -119,7 +134,7 @@ def _ensure_out_dir(output_path, input_path):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv:
+    if "--help" in argv or "-h" in argv:
         print(__doc__)
         return 0
 
@@ -134,20 +149,36 @@ def main(argv=None):
             scale = float(argv[i + 1])
     argv = [a for a in argv if not a.startswith("--scale")]
 
-    # Format ligne de commande
     fmt_cli = None
     for a in argv:
         if a.startswith("--format="):
             fmt_cli = a.split("=")[1].lower()
     argv = [a for a in argv if not a.startswith("--format=")]
 
-    # Fichiers d'entrée / sortie
-    input_path = str(Path(argv[0]).expanduser().resolve())
-    output_cli = str(Path(argv[1]).expanduser().resolve()) if len(argv) > 1 else None
-
     # Configuration (CLI > config > défaut)
     cfg = load_config()
+    cfg_otf = load_otf_config()
     fmt_out = fmt_cli or cfg.get('format', 'png')
+
+    # Fichier d'entrée : argument explicite ou auto-détection via [otf].dossier_base
+    if argv:
+        input_path = str(Path(argv[0]).expanduser().resolve())
+        output_cli = str(Path(argv[1]).expanduser().resolve()) if len(argv) > 1 else None
+    else:
+        base = cfg_otf.get('dossier_base')
+        if not base:
+            print(__doc__)
+            return 0
+        nom_pdf = cfg_otf.get('nom_pdf', 'Ventes.pdf')
+        date_ref = datetime.today()
+        pdf = _trouver_pdf_semaine(base, date_ref, nom_pdf)
+        if pdf is None:
+            dossier = dossier_semaine(date_ref, base)
+            print(f"ERREUR : {nom_pdf!r} introuvable dans {dossier}")
+            return 1
+        input_path = str(pdf)
+        output_cli = None
+
     output_path = _resolve_output_path(input_path, output_cli, cfg, fmt_out)
 
     if not _ensure_out_dir(output_path, input_path):

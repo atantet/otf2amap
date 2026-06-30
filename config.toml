@@ -1,7 +1,13 @@
-# Configuration otf2amap
+# Configuration otf2amap / mail2amap
 # Toutes les variables sont optionnelles.
 # Les options ligne de commande prévalent sur ce fichier.
 
+# Conversion du PDF OuvreTaFerme (commande `otf2amap` sans argument).
+[otf]
+dossier_base = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP"   # racine où chercher <année>/S<semaine>/Ventes.pdf
+# nom_pdf    = "Ventes.pdf"   # nom du PDF à trouver (défaut : Ventes.pdf)
+
+# Sortie de la feuille paniers (commande `otf2amap`).
 [output]
 dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"   # défaut : même dossier que Ventes.pdf
 format  = "png"                               # png (défaut), pdf, md, txt
@@ -14,4 +20,4 @@ drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Google 
 [mail]
 expediteur   = "saint-malo@m.amapj.fr"     # adresse émettrice à filtrer
 objet_motif  = "Feuille de livraison"      # l'objet du mail doit contenir ce motif
-# dossier_base = "~/Documents/.../AMAP"    # où créer <année>/S<semaine>/ ; défaut : dossier parent du dépôt
+dossier_base = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP"   # où créer <année>/S<semaine>/ ; défaut : dossier parent du dépôt

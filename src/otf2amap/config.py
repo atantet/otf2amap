@@ -1,4 +1,4 @@
-"""Lecture de config.toml ([output] dossier / format / nom / drive_remote)."""
+"""Lecture de config.toml ([output], [mail], [otf])."""
 
 import sys
 from pathlib import Path
@@ -13,10 +13,7 @@ except ImportError:               # Python < 3.11
 
 
 def find_config(start=None):
-    """
-    Cherche config.toml dans le dossier courant puis ses parents.
-    Retourne le premier Path trouvé, ou None.
-    """
+    """Cherche config.toml dans le dossier courant puis ses parents. Retourne le premier Path trouvé, ou None."""
     start = Path(start or Path.cwd()).resolve()
     for directory in (start, *start.parents):
         candidate = directory / 'config.toml'
@@ -25,17 +22,8 @@ def find_config(start=None):
     return None
 
 
-def load_config(config_path=None):
-    """
-    Charge la section [output] de config.toml.
-
-    Si `config_path` n'est pas fourni, cherche config.toml depuis le dossier
-    courant. Erreur si aucun fichier n'est trouvé (toutes les clés restent
-    optionnelles, mais le fichier doit exister).
-
-    Retourne un dict avec les clés présentes parmi : dossier, format, nom,
-    drive_remote.
-    """
+def _load_section(section, config_path=None):
+    """Charge une section de config.toml. Le fichier doit exister ; la section est optionnelle."""
     config_path = Path(config_path) if config_path else find_config()
     if not config_path or not config_path.exists():
         print("ERREUR : config.toml introuvable (cherché depuis le dossier courant)")
@@ -45,22 +33,19 @@ def load_config(config_path=None):
         sys.exit(1)
     with open(config_path, 'rb') as f:
         data = tomllib.load(f)
-    return data.get('output', {})
+    return data.get(section, {})
+
+
+def load_config(config_path=None):
+    """Charge la section [output] de config.toml (dossier, format, nom, drive_remote)."""
+    return _load_section('output', config_path)
 
 
 def load_mail_config(config_path=None):
-    """Charge la section [mail] de config.toml (expediteur, objet_motif, dossier_base).
+    """Charge la section [mail] de config.toml (expediteur, objet_motif, dossier_base)."""
+    return _load_section('mail', config_path)
 
-    Mêmes règles que load_config : le fichier doit exister, ses clés sont
-    optionnelles. Retourne {} si la section est absente.
-    """
-    config_path = Path(config_path) if config_path else find_config()
-    if not config_path or not config_path.exists():
-        print("ERREUR : config.toml introuvable (cherché depuis le dossier courant)")
-        sys.exit(1)
-    if tomllib is None:
-        print("ERREUR : pip install tomli pour lire config.toml (Python < 3.11)")
-        sys.exit(1)
-    with open(config_path, 'rb') as f:
-        data = tomllib.load(f)
-    return data.get('mail', {})
+
+def load_otf_config(config_path=None):
+    """Charge la section [otf] de config.toml (dossier_base, nom_pdf)."""
+    return _load_section('otf', config_path)
