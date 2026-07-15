@@ -34,6 +34,30 @@ CALIBRES = frozenset(('demi', 'petit', 'petite', 'gros', 'grosse',
                       'grand', 'grande', 'moyen', 'moyenne'))
 
 
+def group_words_by_line(words, tol):
+    """Regroupe des mots en lignes visuelles selon leur position verticale.
+
+    Un simple arrondi sur grille fixe (round(top / N) * N) sépare à tort deux
+    mots d'une même ligne quand leur `top` diffère de quelques dixièmes de
+    point et encadre une frontière d'arrondi (ex. le chiffre de quantité d'un
+    « … en botte » rendu ~0.3pt plus bas que le nom du produit) : on tolère
+    donc un écart de `tol` par rapport au premier mot de la ligne, sans
+    dépendre d'une grille absolue. Retourne une liste de listes de mots,
+    triées de haut en bas, chaque ligne étant elle-même triée de gauche à
+    droite (x0) pour préserver l'ordre de lecture.
+    """
+    lignes, courante, ref_top = [], [], None
+    for w in sorted(words, key=lambda w: w['top']):
+        if courante and w['top'] - ref_top > tol:
+            lignes.append(courante)
+            courante, ref_top = [], None
+        courante.append(w)
+        ref_top = w['top'] if ref_top is None else min(ref_top, w['top'])
+    if courante:
+        lignes.append(courante)
+    return [sorted(ligne, key=lambda w: w['x0']) for ligne in lignes]
+
+
 def cle_tri_produit(prod):
     """Clé de tri regroupant les calibres d'un même légume (noms inchangés).
 
@@ -93,16 +117,11 @@ def extract_page2_quantities(pdf_path, paniers):
     X_PROD = 140.0
     X_QTY  = 290.0
 
-    by_y = defaultdict(list)
-    for w in words:
-        by_y[round(w['top'] / 3) * 3].append(w)
-
     panier_map = {p['label'].lower(): p['key'] for p in paniers}
     result = defaultdict(dict)
     current_key = None
 
-    for y in sorted(by_y.keys()):
-        ws = sorted(by_y[y], key=lambda w: w['x0'])
+    for ws in group_words_by_line(words, tol=3):
         line_full = ' '.join(w['text'] for w in ws)
 
         m = re.search(r'Panier de la semaine\s*-\s*(\w+)', line_full, re.IGNORECASE)
@@ -169,9 +188,7 @@ def parse_page1(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         words = pdf.pages[0].extract_words(x_tolerance=3, y_tolerance=3)
 
-    by_y = defaultdict(list)
-    for w in words:
-        by_y[round(w['top'] / 4) * 4].append(w)
+    lignes = group_words_by_line(words, tol=4)
 
     def col(ws, x0, x1):
         return [w for w in ws if x0 < w['x0'] < x1]
@@ -179,24 +196,21 @@ def parse_page1(pdf_path):
     def txt(ws):
         return clean(' '.join(w['text'] for w in ws))
 
-    data_ys = [y for y in sorted(by_y.keys()) if y > 70]
-    has_qty_col = any(col(by_y[y], X_QTY_START, X_QTY_END) for y in data_ys[:5])
+    data_lignes = [ws for ws in lignes if min(w['top'] for w in ws) > 70]
+    has_qty_col = any(col(ws, X_QTY_START, X_QTY_END) for ws in data_lignes[:5])
 
     segs = []
-    for y in sorted(by_y.keys()):
-        ws = by_y[y]
+    for ws in lignes:
         prod_ws = [w for w in ws if w['x0'] < X_PROD_END]
         if prod_ws and min(w['x0'] for w in prod_ws) > X_INDENT:
             continue  # ligne de composition d'un panier (format détaillé) : ignorée
         if has_qty_col:
-            segs.append({'y': y,
-                         'prod': txt(prod_ws),
+            segs.append({'prod': txt(prod_ws),
                          'qty':  txt(col(ws, X_QTY_START, X_QTY_END)),
                          'mon':  txt(col(ws, X_MON_START, X_MON_END)),
                          'cmd':  txt(col(ws, X_CMD_START, 999))})
         else:
-            segs.append({'y': y,
-                         'prod': txt(prod_ws),
+            segs.append({'prod': txt(prod_ws),
                          'qty':  '', 'mon': '',
                          'cmd':  txt([w for w in ws if w['x0'] >= X_PROD_END])})
 
