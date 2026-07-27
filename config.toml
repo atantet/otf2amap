@@ -4,12 +4,12 @@
 
 # Conversion du PDF OuvreTaFerme (commande `otf2amap` sans argument).
 [otf]
-dossier_base = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP"   # racine où chercher <année>/S<semaine>/Ventes.pdf
-# nom_pdf    = "Ventes.pdf"   # nom du PDF à trouver (défaut : Ventes.pdf)
+dossier_base = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP"   # racine où chercher <année>/S<semaine>/ventes.pdf
+# nom_pdf    = "Ventes.pdf"   # nom du PDF à trouver (défaut : ventes.pdf puis Ventes.pdf)
 
 # Sortie de la feuille paniers (commande `otf2amap`).
 [output]
-dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"   # défaut : même dossier que Ventes.pdf
+dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"   # défaut : même dossier que ventes.pdf
 format  = "png"                               # png (défaut), pdf, md, txt
 # nom     = "mon_fichier"                       # sans extension ; défaut : YYYY_SNN_feuille_paniers_amap
 drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Google Drive via rclone (voir README)

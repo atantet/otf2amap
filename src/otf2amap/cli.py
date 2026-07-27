@@ -4,7 +4,8 @@ Interface ligne de commande d'otf2amap.
 Usage : otf2amap [entree.pdf] [sortie] [--montant] [--scale 1.0] [--format=png]
 
   entree.pdf : PDF OuvreTaFerme (optionnel si [otf].dossier_base est configuré)
-               → cherche <dossier_base>/<année>/S<semaine>/Ventes.pdf selon la date du jour
+               → cherche <dossier_base>/<année>/S<semaine>/ventes.pdf (ou Ventes.pdf
+                 en repli, ancien format) selon la date du jour
 
 Formats de sortie (défaut : PNG) :
   --format=png   image PNG haute résolution (défaut)
@@ -15,8 +16,8 @@ Formats de sortie (défaut : PNG) :
 
 Configuration (config.toml cherché depuis le dossier courant) :
   [otf]
-  dossier_base = "~/chemin/vers/AMAP"    # racine pour <année>/S<semaine>/Ventes.pdf
-  # nom_pdf    = "Ventes.pdf"            # nom du PDF à trouver (défaut : Ventes.pdf)
+  dossier_base = "~/chemin/vers/AMAP"    # racine pour <année>/S<semaine>/ventes.pdf
+  # nom_pdf    = "Ventes.pdf"            # nom du PDF à trouver (défaut : ventes.pdf puis Ventes.pdf)
 
   [output]
   dossier      = "/chemin/vers/dossier"  # dossier de sortie
@@ -107,11 +108,23 @@ def _resolve_output_path(input_path, output_cli, cfg, fmt_out):
     return str(dossier_path / f"{base}.{fmt_out}")
 
 
-def _trouver_pdf_semaine(base, date_ref, nom_pdf='Ventes.pdf'):
-    """Cherche <base>/<année>/S<semaine>/<nom_pdf> pour la date de référence."""
+NOMS_PDF_DEFAUT = ('ventes.pdf', 'Ventes.pdf')
+
+
+def _trouver_pdf_semaine(base, date_ref, noms_pdf=NOMS_PDF_DEFAUT):
+    """Cherche <base>/<année>/S<semaine>/<nom_pdf> pour la date de référence.
+
+    noms_pdf : nom unique ou séquence de noms essayés dans l'ordre
+    (ventes.pdf en priorité, repli sur Ventes.pdf pour compatibilité passée).
+    """
+    if isinstance(noms_pdf, str):
+        noms_pdf = (noms_pdf,)
     dossier = dossier_semaine(date_ref, base)
-    candidat = dossier / nom_pdf
-    return candidat if candidat.exists() else None
+    for nom_pdf in noms_pdf:
+        candidat = dossier / nom_pdf
+        if candidat.exists():
+            return candidat
+    return None
 
 
 def _ensure_out_dir(output_path, input_path):
@@ -169,12 +182,12 @@ def main(argv=None):
         if not base:
             print(__doc__)
             return 0
-        nom_pdf = cfg_otf.get('nom_pdf', 'Ventes.pdf')
+        noms_pdf = cfg_otf.get('nom_pdf', NOMS_PDF_DEFAUT)
         date_ref = datetime.today()
-        pdf = _trouver_pdf_semaine(base, date_ref, nom_pdf)
+        pdf = _trouver_pdf_semaine(base, date_ref, noms_pdf)
         if pdf is None:
             dossier = dossier_semaine(date_ref, base)
-            print(f"ERREUR : {nom_pdf!r} introuvable dans {dossier}")
+            print(f"ERREUR : {noms_pdf!r} introuvable dans {dossier}")
             return 1
         input_path = str(pdf)
         output_cli = None
