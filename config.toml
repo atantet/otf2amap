@@ -12,7 +12,7 @@ dossier_base = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP"   # 
 dossier = "~/Documents/Travail/1_agri/La petite claye des champs/AMAP/feuilles/"   # défaut : même dossier que ventes.pdf
 format  = "png"                               # png (défaut), pdf, md, txt
 # nom     = "mon_fichier"                       # sans extension ; défaut : YYYY_SNN_feuille_paniers_amap
-drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Google Drive via rclone (voir README)
+drive_remote = "protondrive:La Petite Claye des Champs/AMAP_feuilles"   # envoi auto sur Proton Drive via rclone (voir README)
 
 # Récupération des tableurs de distribution par mail (commande `mail2amap`).
 # Les identifiants IMAP (hôte / adresse / mot de passe d'application) ne sont

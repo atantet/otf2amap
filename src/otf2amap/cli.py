@@ -23,7 +23,7 @@ Configuration (config.toml cherché depuis le dossier courant) :
   dossier      = "/chemin/vers/dossier"  # dossier de sortie
   format       = "png"                   # format de sortie
   nom          = "mon_fichier"           # nom sans extension (remplace le défaut)
-  drive_remote = "gdrive:AMAP/feuilles"  # envoi via rclone (optionnel)
+  drive_remote = "protondrive:AMAP/feuilles"  # envoi via rclone (optionnel)
 
 Les options ligne de commande prévalent sur config.toml.
 config.toml doit exister ; ses variables sont toutes optionnelles.
@@ -200,7 +200,7 @@ def main(argv=None):
     final_path = transformer(input_path, output_path,
                              fmt_out=fmt_out, avec_montant=avec_montant, scale=scale)
 
-    # Envoi optionnel vers Google Drive (ou tout remote rclone)
+    # Envoi optionnel vers Proton Drive (ou tout remote rclone)
     remote = cfg.get('drive_remote')
     if remote:
         upload_to_remote(final_path, remote)

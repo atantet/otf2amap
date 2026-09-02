@@ -116,33 +116,38 @@ Cherché depuis le dossier courant. Toutes les clés sont optionnelles, mais le 
 dossier = "~/chemin/vers/feuilles/"   # défaut : même dossier que le PDF source
 format  = "png"                       # png (défaut), pdf, md, txt
 # nom   = "mon_fichier"               # sans extension ; défaut : YYYY_SNN_feuille_paniers_amap
-# drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Google Drive (rclone)
+# drive_remote = "protondrive:La Petite Claye/AMAP/feuilles"   # envoi auto sur Proton Drive (rclone)
 ```
 
 Les options ligne de commande prévalent sur `config.toml`.
 
-## Envoi automatique sur Google Drive (`rclone`)
+## Envoi automatique sur Proton Drive (`rclone`)
 
 Le fichier est **toujours** produit en local dans `dossier`. Si `drive_remote`
-est renseigné, une **copie** est en plus envoyée sur Drive (le local reste).
+est renseigné, une **copie** est en plus envoyée sur le drive distant (le local
+reste).
 
-Google Drive Desktop n'existant pas sous Linux, on passe par
-[rclone](https://rclone.org). Configuration en une fois :
+Proton Drive n'ayant pas de client desktop sous Linux, on passe par
+[rclone](https://rclone.org) (backend `protondrive`, expérimental).
+Configuration en une fois :
 
 ```bash
 conda activate otf2amap          # rclone est installé dans l'environnement
-rclone config                    # créer un remote « gdrive » de type Google Drive
-                                 #  (n > drive > laisser la plupart par défaut,
-                                 #   autoriser dans le navigateur, y pour confirmer)
-rclone lsd gdrive:              # vérifier que la connexion marche
+rclone config                    # créer un remote « protondrive » de type Proton Drive
+                                 #  (n > protondrive > identifiants Proton,
+                                 #   2FA/app password si activé)
+rclone lsd protondrive:          # vérifier que la connexion marche
 ```
 
 Puis dans `config.toml`, indiquer le dossier cible (le chemin tel qu'il apparaît
-dans « Mon Drive », sans le préfixe « Mon Drive ») :
+dans Proton Drive) :
 
 ```toml
-drive_remote = "gdrive:La Petite Claye/AMAP/feuilles"
+drive_remote = "protondrive:La Petite Claye/AMAP/feuilles"
 ```
+
+D'autres remotes rclone (Google Drive, etc.) restent utilisables de la même
+façon en changeant simplement le nom du remote dans `drive_remote`.
 
 À chaque conversion, la feuille est envoyée automatiquement. Si rclone est
 absent ou l'envoi échoue, l'outil prévient sans planter et conserve le fichier
