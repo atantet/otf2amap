@@ -83,7 +83,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
     if avec_montant:
         c.drawCentredString(cx(xM, W_MON), hy, "MONTANT")
     for i, pan in enumerate(paniers):
-        c.drawCentredString(cx(xPans[i], W_PAN), hy, f"{pan['n']} {pan['label'].upper()}")
+        c.drawCentredString(cx(xPans[i], W_PAN), hy, f"{pan['n']} {pan['label'].upper()}S")
 
     c.setStrokeColor(BLACK)
     c.setLineWidth(0.4)

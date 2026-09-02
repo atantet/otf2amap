@@ -5,7 +5,7 @@ def build_text_table(rows, paniers, titre, mode='md'):
     """
     Génère le tableau en Markdown (mode='md') ou texte ASCII (mode='txt').
     """
-    pan_hdrs = [f"{p['n']} {p['label'].upper()}" for p in paniers]
+    pan_hdrs = [f"{p['n']} {p['label'].upper()}S" for p in paniers]
     hdrs  = [titre, 'TOTAL'] + pan_hdrs
     col_w = [max(len(hdrs[0]), max((len(r['prod']) for r in rows), default=0))]
     col_w += [max(len(hdrs[1]), max((len(f"{r['qty_num']} {r['unite']}") for r in rows), default=0))]

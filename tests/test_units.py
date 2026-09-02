@@ -208,7 +208,7 @@ def test_build_text_table_markdown():
     out = build_text_table(rows, paniers, "03/06/2026", mode="md")
     lines = out.splitlines()
     assert lines[0].startswith("| 03/06/2026")
-    assert "11 PETIT" in lines[0] and "8 MOYEN" in lines[0]
+    assert "11 PETITS" in lines[0] and "8 MOYENS" in lines[0]
     assert set(lines[1]) <= {"|", "-"}      # ligne de séparation
     assert "Fève" in lines[2] and "0.45 kg" in lines[2]
     assert len(lines) == 3                  # en-tête + séparateur + 1 produit
