@@ -5,6 +5,7 @@ from email.message import EmailMessage
 
 from otf2amap.allocate import allocate, match_produit
 from otf2amap.extract import cle_tri_produit, parse_raw_cmd
+from otf2amap.fruits import _unite_en_kg
 from otf2amap.legumes import renommer_avec_paniers
 from otf2amap.mailbox import extract_contrat, parse_date_livraison
 from otf2amap.naming import prefixe_semaine
@@ -222,3 +223,10 @@ def test_build_text_table_txt_a_des_bordures():
     lines = out.splitlines()
     assert lines[0].startswith("+") and lines[0].endswith("+")
     assert lines[-1].startswith("+")        # bordure de fermeture en mode txt
+
+
+def test_unite_en_kg():
+    assert _unite_en_kg(" 500 g") == 0.5
+    assert _unite_en_kg(" 1 kg") == 1.0
+    assert _unite_en_kg("1,5 kg") == 1.5
+    assert _unite_en_kg("botte") is None

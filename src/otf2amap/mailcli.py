@@ -3,7 +3,7 @@
 En amont d'otf2amap. Télécharge les pièces jointes des mails de distribution
 AmapJ dans <base>/<année>/S<semaine>/, puis affiche le nombre de paniers de
 légumes par type (petit / moyen / grand) — ce qui sert à créer la vente sur
-OuvreTaFerme.
+OuvreTaFerme — et le poids total de pommes et de poires demandé.
 
 Usage :
     mail2amap                 # dernière livraison reçue (par défaut)
@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import load_mail_config
+from .fruits import poids_total
 from .legumes import compter_paniers, renommer_avec_paniers
 from .mailbox import connect, find_distributions, save_attachments
 from .mailenv import REPO_ROOT, ConfigError, load_imap_secrets
@@ -49,6 +50,16 @@ def _est_legumes(texte):
     """Vrai si `texte` (nom de contrat ou de fichier) désigne le contrat Légumes."""
     t = (texte or "").lower()
     return "légume" in t or "legume" in t
+
+
+def _fruit(texte):
+    """« Pommes » / « Poires » si `texte` désigne ce contrat, sinon None."""
+    t = (texte or "").lower()
+    if "pomme" in t:
+        return "Pommes"
+    if "poire" in t:
+        return "Poires"
+    return None
 
 
 def _trouver_legumes_local(base, date_cible):
@@ -179,6 +190,10 @@ def main(argv=None):
             for c in chemins:
                 if c.suffix.lower() == ".xls" and (_est_legumes(contrat) or _est_legumes(c.name)):
                     _traiter_legumes(c, renommer=True)
+        for c in chemins:
+            fruit = _fruit(contrat) or _fruit(c.name)
+            if fruit and c.suffix.lower() == ".xls":
+                _traiter_fruit(c, fruit)
 
     return 0
 
@@ -199,7 +214,25 @@ def _mode_local(fichier_path, date_cible, base):
         return 1
     print(f"Lecture du tableur Légumes : {chemin}")
     _traiter_legumes(chemin)
+    if not fichier_path:
+        for c in sorted(chemin.parent.glob("*.xls")):
+            fruit = _fruit(c.name)
+            if fruit:
+                _traiter_fruit(c, fruit)
     return 0
+
+
+def _traiter_fruit(chemin, fruit):
+    """Lit le tableur Pommes / Poires et imprime le poids total demandé."""
+    try:
+        quantite, unite, kg = poids_total(chemin)
+    except Exception as e:                                    # robustesse lecture xls
+        print(f"  ERREUR lecture {fruit} ({chemin.name}) : {e}")
+        return
+    if kg is None:
+        print(f"  {fruit} — {quantite:g} × « {unite} » (unité illisible, poids non calculé)")
+    else:
+        print(f"  {fruit} — poids total : {kg:g} kg ({quantite:g} × {unite})")
 
 
 def _traiter_legumes(chemin, renommer=False):
