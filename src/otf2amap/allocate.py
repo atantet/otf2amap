@@ -55,6 +55,11 @@ def allocate(rows, paniers, page2_data):
                     cells[pan['key']] = f"{fmt(qty_p2 / pan['n'])} {unit_p2}"
         elif qtys:
             # Fallback : permutation optimale (score lexicographique)
+            if len(qtys) > len(paniers):
+                raise ValueError(
+                    f"{r['prod']} : {len(qtys)} quantités commandées pour "
+                    f"{len(paniers)} panier(s) reconnu(s) — extraction des "
+                    "paniers incomplète ?")
             best_score  = None
             best_assign = list(range(len(qtys)))
             for perm in itertools.permutations(range(len(paniers)), len(qtys)):

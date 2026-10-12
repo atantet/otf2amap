@@ -1,9 +1,13 @@
 """
 Extraction du texte des PDF OuvreTaFerme.
 
-Le PDF source comporte deux pages :
-  - page 1 : tableau des ventes (PRODUIT / QUANTITÉ / MONTANT / COMMANDES)
-  - page 2 : récapitulatif des commandes par panier, avec la date de retrait
+Le PDF source comporte deux parties :
+  - « page 1 » : tableau des ventes (PRODUIT / QUANTITÉ / MONTANT / COMMANDES),
+    qui déborde sur plusieurs pages quand il y a beaucoup de lignes (ex. trois
+    types de paniers en format détaillé) ;
+  - « page 2 » : récapitulatif des commandes par panier, avec la date de
+    retrait. C'est une étiquette de commande, elle-même paginée : ses pages
+    sont posées côte à côte sur la feuille.
 """
 
 import re
@@ -13,16 +17,60 @@ import pdfplumber
 
 from .util import clean
 
+# ── Découpage du PDF : pages de ventes / pages de récapitulatif ───────────────
+
+# Largeur d'une étiquette de commande : les pages du récapitulatif sont posées
+# côte à côte sur la feuille, décalées de ce pas en x.
+X_ETIQUETTE = 414.0
+
+
+def _est_page_ventes(words):
+    """Vrai si la page porte l'en-tête du tableau des ventes."""
+    textes = {w['text'] for w in words}
+    return 'PRODUIT' in textes and 'COMMANDES' in textes
+
+
+def _lire_pages(pdf_path):
+    """
+    Retourne (ventes, recap) : deux listes de (mots, hauteur_page), selon que
+    la page porte ou non l'en-tête du tableau des ventes. Sans en-tête
+    reconnu, on retombe sur le découpage historique (page 1 / pages suivantes).
+    """
+    with pdfplumber.open(pdf_path) as pdf:
+        pages = [(pg.extract_words(x_tolerance=3, y_tolerance=3), pg.height)
+                 for pg in pdf.pages]
+    ventes = [p for p in pages if _est_page_ventes(p[0])]
+    if not ventes:
+        return pages[:1], pages[1:]
+    return ventes, [p for p in pages if not _est_page_ventes(p[0])]
+
+
+def _lignes_recap(pdf_path):
+    """
+    Lignes du récapitulatif dans l'ordre de lecture : étiquette après
+    étiquette (de gauche à droite sur chaque feuille), chacune de haut en bas.
+    Les x sont ramenés au repère de la première étiquette.
+    """
+    lignes = []
+    for words, _ in _lire_pages(pdf_path)[1]:
+        colonnes = defaultdict(list)
+        for w in words:
+            n = int(w['x0'] // X_ETIQUETTE)
+            colonnes[n].append({**w, 'x0': w['x0'] - n * X_ETIQUETTE})
+        for n in sorted(colonnes):
+            lignes.extend(group_words_by_line(colonnes[n], tol=3))
+    return lignes
+
+
 # ── Page 2 : date et quantités par panier ─────────────────────────────────────
 
 def extract_date_from_page2(pdf_path):
-    """Retourne la date de retrait (DD/MM/YYYY) depuis la page 2, ou None."""
-    with pdfplumber.open(pdf_path) as pdf:
-        if len(pdf.pages) < 2:
-            return None
-        text = pdf.pages[1].extract_text() or ''
-    m = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', text)
-    return m.group(1) if m else None
+    """Retourne la date de retrait (DD/MM/YYYY) depuis le récapitulatif, ou None."""
+    for ws in _lignes_recap(pdf_path):
+        m = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', ' '.join(w['text'] for w in ws))
+        if m:
+            return m.group(1)
+    return None
 
 
 # Clés de paniers reconnues et leur ordre d'affichage (partagé page 1 / page 2).
@@ -82,13 +130,9 @@ def extract_paniers_from_page2(pdf_path):
     Sert de repli quand la page 1 (format détaillé) ne porte pas ce nombre.
     Retourne la liste {key, label, n} triée petit/moyen/grand.
     """
-    with pdfplumber.open(pdf_path) as pdf:
-        if len(pdf.pages) < 2:
-            return []
-        text = pdf.pages[1].extract_text() or ''
-
     paniers = []
-    for line in text.splitlines():
+    for ws in _lignes_recap(pdf_path):
+        line = ' '.join(w['text'] for w in ws)
         m = re.search(r'Panier de la semaine\s*-\s*(\w+)\s+(\d+(?:\.\d+)?)',
                       line, re.IGNORECASE)
         if not m:
@@ -108,11 +152,6 @@ def extract_page2_quantities(pdf_path, paniers):
     Utilise les positions x pour ignorer les parasites (numéros de commande).
     Retourne {nom_produit: {clé_panier: (qty, unit)}}
     """
-    with pdfplumber.open(pdf_path) as pdf:
-        if len(pdf.pages) < 2:
-            return {}
-        words = pdf.pages[1].extract_words(x_tolerance=3, y_tolerance=3)
-
     # Les noms de produits commencent vers x=168, les quantités vers x=290
     X_PROD = 140.0
     X_QTY  = 290.0
@@ -121,7 +160,7 @@ def extract_page2_quantities(pdf_path, paniers):
     result = defaultdict(dict)
     current_key = None
 
-    for ws in group_words_by_line(words, tol=3):
+    for ws in _lignes_recap(pdf_path):
         line_full = ' '.join(w['text'] for w in ws)
 
         m = re.search(r'Panier de la semaine\s*-\s*(\w+)', line_full, re.IGNORECASE)
@@ -166,7 +205,8 @@ def parse_raw_cmd(raw):
 
 def parse_page1(pdf_path):
     """
-    Extrait produits et paniers depuis la page 1 du PDF.
+    Extrait produits et paniers depuis le tableau des ventes du PDF (page 1,
+    et les suivantes quand le tableau déborde).
     Gère deux layouts :
       Layout A : colonnes QUANTITÉ et MONTANT distinctes (x 198–297)
       Layout B : tout fusionné après la colonne PRODUIT
@@ -185,8 +225,12 @@ def parse_page1(pdf_path):
     # le nom de produit commence au-delà de ce seuil : c'est du détail de panier.
     X_INDENT = 45.0
 
-    with pdfplumber.open(pdf_path) as pdf:
-        words = pdf.pages[0].extract_words(x_tolerance=3, y_tolerance=3)
+    # Pages de ventes mises bout à bout : chaque page est décalée en hauteur
+    # de celles qui la précèdent, pour ne former qu'un seul tableau.
+    words, decalage = [], 0.0
+    for mots, hauteur in _lire_pages(pdf_path)[0]:
+        words.extend({**w, 'top': w['top'] + decalage} for w in mots)
+        decalage += hauteur
 
     lignes = group_words_by_line(words, tol=4)
 
