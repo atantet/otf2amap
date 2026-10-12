@@ -11,6 +11,7 @@ ensuite nommé d'après la semaine ISO (cf. naming.prefixe_semaine).
 """
 
 import email
+import html
 import imaplib
 import re
 from datetime import datetime
@@ -65,21 +66,28 @@ def parse_date_livraison(sujet):
         return None
 
 
+def _html_en_texte(source):
+    """Texte d'un corps HTML : <br> / fins de bloc → sauts de ligne, balises retirées."""
+    texte = re.sub(r"(?i)<br\s*/?>|</(?:p|div|tr|li)>", "\n", source)
+    return html.unescape(re.sub(r"<[^>]+>", "", texte))
+
+
 def _text_body(msg):
-    """Texte brut du corps du mail (concatène les parties text/plain)."""
-    parts = []
+    """Texte brut du corps du mail (parties text/plain, à défaut text/html).
+
+    Les mails AmapJ reçus en direct n'ont qu'une partie text/html.
+    """
+    textes = {"text/plain": [], "text/html": []}
     for part in msg.walk():
-        if part.get_content_type() == "text/plain":
+        ctype = part.get_content_type()
+        if ctype in textes and not part.get_filename():
             payload = part.get_payload(decode=True)
             if payload:
                 charset = part.get_content_charset() or "utf-8"
-                parts.append(payload.decode(charset, errors="replace"))
-    if not parts:                                    # repli : payload simple
-        payload = msg.get_payload(decode=True)
-        if payload:
-            charset = msg.get_content_charset() or "utf-8"
-            parts.append(payload.decode(charset, errors="replace"))
-    return "\n".join(parts)
+                textes[ctype].append(payload.decode(charset, errors="replace"))
+    if textes["text/plain"]:
+        return "\n".join(textes["text/plain"])
+    return "\n".join(_html_en_texte(h) for h in textes["text/html"])
 
 
 def extract_contrat(msg):

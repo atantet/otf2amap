@@ -28,17 +28,17 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import load_mail_config
-from .fruits import poids_total
+from .fruits import FRUITS, nom_fruit, poids_total, tableurs_fruits
 from .legumes import compter_paniers, renommer_avec_paniers
 from .mailbox import connect, find_distributions, save_attachments
 from .mailenv import REPO_ROOT, ConfigError, load_imap_secrets
 from .naming import dossier_semaine
 
-_CONTRAT_PJ_RE = re.compile(r"distri-(.+?)\s*\(", re.IGNORECASE)
+_CONTRAT_PJ_RE = re.compile(r"distri-(.+?)-\d{2}-\d{2}-\d{4}", re.IGNORECASE)
 
 
 def _contrat_depuis_pj(chemins):
-    """Nom du contrat extrait du nom d'une pièce jointe (« distri-<Nom> (…) »)."""
+    """Nom du contrat extrait du nom d'une pièce jointe (« distri-<Nom>-JJ-MM-AAAA… »)."""
     for c in chemins:
         m = _CONTRAT_PJ_RE.match(c.name)
         if m:
@@ -52,14 +52,14 @@ def _est_legumes(texte):
     return "légume" in t or "legume" in t
 
 
-def _fruit(texte):
-    """« Pommes » / « Poires » si `texte` désigne ce contrat, sinon None."""
-    t = (texte or "").lower()
-    if "pomme" in t:
-        return "Pommes"
-    if "poire" in t:
-        return "Poires"
-    return None
+def _rang_contrat(texte):
+    """Rang d'affichage du contrat : Légumes, Pommes, Poires, Pain, puis le reste."""
+    if _est_legumes(texte):
+        return 0
+    fruit = nom_fruit(texte)
+    if fruit:
+        return 1 + FRUITS.index(fruit)
+    return 3 if "pain" in (texte or "").lower() else 4
 
 
 def _trouver_legumes_local(base, date_cible):
@@ -170,14 +170,20 @@ def main(argv=None):
         print(f"Aucune livraison à traiter (date demandée : {cible}).")
         return 0
 
+    # 1) Téléchargement ; le contrat se lit dans le corps du mail, repli nom de PJ.
+    livraisons = []
     for d in a_traiter:
-        sujet, date_livraison, contrat = d["sujet"], d["date"], d["contrat"]
-        if date_livraison is None:
-            print(f"AVERTISSEMENT : date illisible dans l'objet, mail ignoré : {sujet!r}")
+        if d["date"] is None:
+            print(f"AVERTISSEMENT : date illisible dans l'objet, mail ignoré : {d['sujet']!r}")
             continue
-        dossier = dossier_semaine(date_livraison, base)
+        dossier = dossier_semaine(d["date"], base)
         chemins = save_attachments(d["message"], dossier)
-        contrat = contrat or _contrat_depuis_pj(chemins)
+        contrat = d["contrat"] or _contrat_depuis_pj(chemins)
+        livraisons.append((d["date"], contrat, dossier, chemins))
+
+    # 2) Affichage, toujours dans le même ordre : Légumes, Pommes, Poires, Pain.
+    livraisons.sort(key=lambda liv: (liv[0], _rang_contrat(liv[1])))
+    for date_livraison, contrat, dossier, chemins in livraisons:
         libelle = contrat or "contrat inconnu"
         print(f"\nLivraison du {date_livraison:%d/%m/%Y} — {libelle} → {dossier}")
         if not chemins:
@@ -191,7 +197,7 @@ def main(argv=None):
                 if c.suffix.lower() == ".xls" and (_est_legumes(contrat) or _est_legumes(c.name)):
                     _traiter_legumes(c, renommer=True)
         for c in chemins:
-            fruit = _fruit(contrat) or _fruit(c.name)
+            fruit = nom_fruit(contrat) or nom_fruit(c.name)
             if fruit and c.suffix.lower() == ".xls":
                 _traiter_fruit(c, fruit)
 
@@ -215,10 +221,8 @@ def _mode_local(fichier_path, date_cible, base):
     print(f"Lecture du tableur Légumes : {chemin}")
     _traiter_legumes(chemin)
     if not fichier_path:
-        for c in sorted(chemin.parent.glob("*.xls")):
-            fruit = _fruit(c.name)
-            if fruit:
-                _traiter_fruit(c, fruit)
+        for fruit, c in tableurs_fruits(chemin.parent):
+            _traiter_fruit(c, fruit)
     return 0
 
 

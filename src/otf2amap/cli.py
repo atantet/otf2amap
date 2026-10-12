@@ -7,6 +7,9 @@ Usage : otf2amap [entree.pdf] [sortie] [--montant] [--scale 1.0] [--format=png]
                → cherche <dossier_base>/<année>/S<semaine>/ventes.pdf (ou Ventes.pdf
                  en repli, ancien format) selon la date du jour
 
+Les tableurs AmapJ Pommes / Poires (.xls) présents dans le dossier du PDF
+(téléchargés par mail2amap) ajoutent une ligne avec leurs poids totaux.
+
 Formats de sortie (défaut : PNG) :
   --format=png   image PNG haute résolution (défaut)
   --format=pdf   PDF
@@ -36,6 +39,7 @@ from pathlib import Path
 from .config import load_config, load_otf_config
 from .core import build_sheet
 from .extract import extract_date_from_page2
+from .fruits import lignes_fruits
 from .naming import SORTIE, dossier_semaine, prefixe_semaine
 from .render import write_pdf, write_png
 from .text import build_text_table
@@ -65,6 +69,8 @@ def transformer(input_path, output_path=None, fmt_out='png',
         print(f"ERREUR : {e}.")
         sys.exit(1)
     print(f"  Date : {titre}")
+    # Pommes / Poires : tableurs AmapJ du même dossier (téléchargés par mail2amap)
+    rows += lignes_fruits(input_path.parent)
 
     # Nom de sortie par défaut (nécessite le titre pour le préfixe semaine)
     if not output_path:

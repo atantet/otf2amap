@@ -149,6 +149,20 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
             c.setFont(FONT, S)
             c.drawCentredString(cx(xM, W_MON), ym - S / 2, row['mon'])
 
+        suite = row.get('suite')
+        if suite:
+            # Ligne des fruits : nom du second fruit dans la première colonne
+            # de panier, sa quantité dans la suivante (à la suite du nom s'il
+            # n'y a qu'une colonne).
+            nom, num, unit = suite
+            x0 = xPans[0] if xPans else xM + W_MON
+            c.setFont(FONT, S)
+            c.drawString(x0 + 4, ym - S * 0.35, nom)   # même ligne de base que draw_prod
+            if n_p > 1:
+                draw_qty(num, unit, xPans[1], W_PAN, ym)
+            else:
+                draw_qty(num, unit, x0 + 4 + c.stringWidth(nom, FONT, S) + 8, W_QTY, ym)
+
         for i, pan in enumerate(paniers):
             val = row['cells'].get(pan['key'], '')
             if val:

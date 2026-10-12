@@ -3,11 +3,13 @@
 from datetime import datetime
 from email.message import EmailMessage
 
+from otf2amap import fruits
 from otf2amap.allocate import allocate, match_produit
 from otf2amap.extract import cle_tri_produit, parse_raw_cmd
-from otf2amap.fruits import _unite_en_kg
+from otf2amap.fruits import _unite_en_kg, lignes_fruits
 from otf2amap.legumes import renommer_avec_paniers
 from otf2amap.mailbox import extract_contrat, parse_date_livraison
+from otf2amap.mailcli import _contrat_depuis_pj, _rang_contrat
 from otf2amap.naming import prefixe_semaine
 from otf2amap.text import build_text_table
 from otf2amap.util import clean, fmt
@@ -87,6 +89,15 @@ def test_extract_contrat_distingue_les_contrats():
     # objet + expéditeur identiques : seul le corps distingue les contrats
     assert extract_contrat(_mail(_CORPS_LEGUMES)) == "Légumes (octobre 2025 - mars 2026)"
     assert extract_contrat(_mail(_CORPS_POMMES)) == "Pommes (octobre 2025 à mars 2026)"
+
+
+def test_extract_contrat_mail_html_seul():
+    # Mail AmapJ réel : une seule partie text/html, lignes séparées par <br/>.
+    msg = EmailMessage()
+    msg.set_content(
+        "Bonjour ,<br/><br/>Nom du contrat : Pain octobre 2026 - mars 2027<br/>"
+        "Nom du producteur : Fournil &amp; Cie<br/>", subtype="html")
+    assert extract_contrat(msg) == "Pain octobre 2026 - mars 2027"
 
 
 def test_extract_contrat_absent():
@@ -230,3 +241,38 @@ def test_unite_en_kg():
     assert _unite_en_kg(" 1 kg") == 1.0
     assert _unite_en_kg("1,5 kg") == 1.5
     assert _unite_en_kg("botte") is None
+
+
+def test_lignes_fruits(tmp_path, monkeypatch):
+    # Les tableurs Pommes / Poires avec une commande tiennent sur une seule ligne.
+    poids = {"distri-Pommes (x)-07-10-2026.xls": (24.0, "500 g", 12.0),
+             "distri-Poires (x)-07-10-2026.xls": (3.0, "1 kg", 3.0),
+             "distri-Poires (x)-vide.xls": (0, "1 kg", 0.0),
+             "distri-Pain x-07-10-2026.xls": (5.0, "1 kg", 5.0)}
+    for nom in poids:
+        (tmp_path / nom).write_bytes(b"")
+    monkeypatch.setattr(fruits, "poids_total", lambda chemin: poids[chemin.name])
+    assert lignes_fruits(tmp_path) == [
+        {"prod": "Pommes", "qty_num": "12", "unite": "kg", "mon": "", "cells": {},
+         "suite": ("Poires", "3", "kg")}]
+    # Un seul fruit commandé : ligne simple, sans suite.
+    poids["distri-Pommes (x)-07-10-2026.xls"] = (0, "500 g", 0.0)
+    assert lignes_fruits(tmp_path) == [
+        {"prod": "Poires", "qty_num": "3", "unite": "kg", "mon": "", "cells": {}}]
+
+
+def test_rang_contrat_ordre_affichage():
+    contrats = ["Pain octobre 2026 - mars 2027", None, "Poires (octobre 2026 à janvier 2027)",
+                "Légumes (octobre 2026 à fin mars 2027)", "Pommes (octobre 2026 à mars 2027)"]
+    ordonne = sorted(contrats, key=_rang_contrat)
+    assert [(c or "?").split()[0] for c in ordonne] == ["Légumes", "Pommes", "Poires", "Pain", "?"]
+
+
+def test_contrat_depuis_pj_avec_ou_sans_parentheses():
+    # Le contrat Pain n'a pas de parenthèses dans son nom de fichier.
+    from pathlib import Path
+    assert _contrat_depuis_pj([Path("distri-Pain octobre 2026 - mars 2027-14-10-2026.xls")]) \
+        == "Pain octobre 2026 - mars 2027"
+    assert _contrat_depuis_pj([Path("distri-Légumes (octobre 2026 à fin mars 2027)-14-10-2026_12_9_1.xls")]) \
+        == "Légumes (octobre 2026 à fin mars 2027)"
+    assert _contrat_depuis_pj([Path("autre.pdf")]) is None

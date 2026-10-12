@@ -161,6 +161,7 @@ Un tableau A5 paysage avec :
 - Une colonne **TOTAL** (quantité totale commandée)
 - Une colonne par type de panier : **N PETIT**, **N MOYEN**, **N GRAND** (selon ce qui est commandé)
 - Les quantités par panier calculées automatiquement pour chaque produit
+- Une ligne **Pommes … Poires …** (poids totaux en kg, côte à côte sur la même ligne) si les tableurs AmapJ correspondants, téléchargés par `mail2amap`, sont dans le même dossier que le PDF
 - Les lignes « Panier de la semaine » filtrées (elles servent uniquement à détecter les types de paniers)
 
 ## Structure du code
@@ -177,6 +178,7 @@ src/otf2amap/
   mailbox.py    récupération IMAP, date (objet) et contrat (corps) des mails
   mailenv.py    identifiants IMAP depuis .env (jamais versionné)
   legumes.py    comptage des paniers dans le tableur .xls AmapJ
+  fruits.py     poids total Pommes / Poires dans les tableurs .xls AmapJ
   mailcli.py    arguments et orchestration (mail2amap)
 otf2amap.py     lanceur de compatibilité
 tests/          batterie de tests (unitaires + intégration)
