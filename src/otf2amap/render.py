@@ -136,6 +136,35 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
         c.setFont(FONT, S_UNIT)
         c.drawString(qx + qw + gap, ym - S_UNIT / 2, unit)
 
+    def draw_qtys(val, xc, wc, ym):
+        """
+        Case « 1 moy. + 1 petite » : chaque terme en chiffre gras + format
+        petit, côte à côte s'ils tiennent dans la case, sinon empilés.
+        """
+        termes = [t.rsplit(' ', 1) for t in val.split(' + ')]
+        if len(termes) == 1:
+            draw_qty(*termes[0], xc, wc, ym)
+            return
+        gap, plus = 3.0, ' + '
+        larg = [c.stringWidth(n, FONT_BOLD, S) + gap + c.stringWidth(u, FONT, S_UNIT)
+                for n, u in termes]
+        w_plus = c.stringWidth(plus, FONT, S_UNIT)
+        total = sum(larg) + w_plus * (len(termes) - 1)
+        if total <= wc - 6:
+            x = cx(xc, wc) - total / 2
+            for i, ((n, u), w) in enumerate(zip(termes, larg, strict=True)):
+                if i:
+                    c.setFont(FONT, S_UNIT)
+                    c.drawString(x, ym - S_UNIT / 2, plus)
+                    x += w_plus
+                draw_qty(n, u, x, w, ym)
+                x += w
+        else:
+            pas = S * 1.15
+            y0 = ym + pas * (len(termes) - 1) / 2
+            for i, (n, u) in enumerate(termes):
+                draw_qty(n, u, xc, wc, y0 - i * pas)
+
     cur_y = HDR_Y
     for row in rows:
         rb = cur_y - ROW_H
@@ -143,7 +172,7 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
 
         c.setFillColor(BLACK)
         draw_prod(row['prod'], rb, ROW_H, W_PROD - 8)
-        draw_qty(row['qty_num'], row['unite'], xQ, W_QTY, ym)
+        draw_qtys(f"{row['qty_num']} {row['unite']}".strip(), xQ, W_QTY, ym)
 
         if avec_montant:
             c.setFont(FONT, S)
@@ -166,9 +195,8 @@ def build_new_page(rows, paniers, titre, avec_montant=False, scale=1.0):
         for i, pan in enumerate(paniers):
             val = row['cells'].get(pan['key'], '')
             if val:
-                parts = val.rsplit(' ', 1)
-                if len(parts) == 2:
-                    draw_qty(parts[0], parts[1], xPans[i], W_PAN, ym)
+                if ' ' in val:
+                    draw_qtys(val, xPans[i], W_PAN, ym)
                 else:
                     c.setFont(FONT_BOLD, S)
                     c.drawCentredString(cx(xPans[i], W_PAN), ym - S / 2, val)

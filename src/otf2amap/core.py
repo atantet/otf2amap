@@ -1,6 +1,6 @@
 """Orchestration : du PDF source aux lignes prêtes à rendre."""
 
-from .allocate import allocate
+from .allocate import allocate, fusionner_formats
 from .extract import (
     extract_date_from_page2,
     extract_page2_quantities,
@@ -28,4 +28,5 @@ def build_sheet(input_path):
         raise ValueError("aucun panier 'Panier de la semaine' trouvé")
     page2_data = extract_page2_quantities(input_path, paniers)
     allocate(rows, paniers, page2_data)
+    rows = fusionner_formats(rows, paniers)
     return rows, paniers, titre

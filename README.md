@@ -161,6 +161,7 @@ Un tableau A5 paysage avec :
 - Une colonne **TOTAL** (quantité totale commandée)
 - Une colonne par type de panier : **N PETIT**, **N MOYEN**, **N GRAND** (selon ce qui est commandé)
 - Les quantités par panier calculées automatiquement pour chaque produit
+- Les **formats d'un même produit à la pièce** regroupés sur une ligne : « Cresson en botte » et « Cresson en petite botte » (ou « Chicorée à l'unité » / « Chicorée petite à l'unité ») deviennent une seule ligne dont les cases portent quantité et format — `1 petite`, `1 moy.`, `1 moy. + 1 petite` ; total `10 moy. + 9 petites`. Fusion seulement si les noms sont identiques au calibre près (variété comprise) et l'unité est `u.` ou `bte` ; jamais pour les produits au poids
 - Une ligne **Pommes … Poires …** (poids totaux en kg, côte à côte sur la même ligne) si les tableurs AmapJ correspondants, téléchargés par `mail2amap`, sont dans le même dossier que le PDF
 - Les lignes « Panier de la semaine » filtrées (elles servent uniquement à détecter les types de paniers)
 

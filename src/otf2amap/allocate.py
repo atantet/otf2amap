@@ -11,6 +11,7 @@ Pour chaque produit, on remplit une case par type de panier. Deux sources :
 import itertools
 import re
 
+from .extract import CALIBRES
 from .util import fmt
 
 
@@ -76,3 +77,101 @@ def allocate(rows, paniers, page2_data):
         r['cells'] = cells
 
     return rows
+
+
+# ── Fusion des formats d'un même produit à la pièce ──────────────────────────
+
+# Unités « à la pièce » concernées par la fusion des formats.
+UNITES_PIECE = frozenset(('u', 'u.', 'bte'))
+
+# Libellé du format standard (nom sans qualificatif de calibre).
+FORMAT_STANDARD = 'moy.'
+
+
+def _nom_et_format(prod):
+    """
+    Sépare un nom de produit en (clé sans calibre, format).
+      "Cresson en petite botte" → ("cresson en botte", "petite")
+      "Cresson en botte"        → ("cresson en botte", None)
+    """
+    mots = re.findall(r"[\w'’]+", prod.lower())
+    calibres = [m for m in mots if m in CALIBRES]
+    cle = ' '.join(m for m in mots if m not in CALIBRES)
+    return cle, (calibres[0] if calibres else None)
+
+
+def _sans_calibre(prod):
+    """Retire du nom affiché le premier qualificatif de calibre."""
+    for m in re.finditer(r"[\w'’]+", prod):
+        if m.group().lower() in CALIBRES:
+            nom = (prod[:m.start()] + prod[m.end():]).strip()
+            return re.sub(r'\s+', ' ', nom[:1].upper() + nom[1:])
+    return prod
+
+
+def _qte_format(q, libelle):
+    """ "1 petite", "2 petites", "3 moy." (les abréviations restent invariables)."""
+    if q > 1 and not libelle.endswith('.') and not libelle.endswith('s'):
+        libelle += 's'
+    return f"{fmt(q)} {libelle}"
+
+
+def fusionner_formats(rows, paniers):
+    """
+    Regroupe sur une seule ligne les formats d'un même produit à la pièce
+    (« X en botte » / « X en petite botte », « X à l'unité » / « X petite à
+    l'unité »…) : chaque case porte alors la quantité ET le format, ex.
+    « 1 petite », « 1 moy. », « 1 moy. + 1 petite ».
+
+    Deux lignes sont fusionnées si leurs noms sont identiques au qualificatif
+    de calibre près, avec la même unité à la pièce (u., bte) et des formats
+    différents. Les produits au poids ne sont jamais fusionnés.
+    Retourne la nouvelle liste de lignes (ordre conservé).
+    """
+    groupes = {}
+    for r in rows:
+        if r.get('unite') not in UNITES_PIECE:
+            continue
+        cle, _ = _nom_et_format(r['prod'])
+        groupes.setdefault((cle, r['unite'].rstrip('.')), []).append(r)
+
+    fusion = {}   # id(ligne de tête) → ligne fusionnée ; autres ids → None
+    for membres in groupes.values():
+        formats = [_nom_et_format(r['prod'])[1] for r in membres]
+        if len(membres) < 2 or len(set(formats)) < len(formats):
+            continue
+        # Format standard d'abord, puis les autres dans l'ordre d'arrivée.
+        ordre = sorted(zip(formats, membres, strict=True),
+                       key=lambda fm: fm[0] is not None)
+        libelles = [(f or FORMAT_STANDARD, r) for f, r in ordre]
+
+        cells = {}
+        for pan in paniers:
+            parts = []
+            for lib, r in libelles:
+                val = r['cells'].get(pan['key'], '')
+                if val:
+                    parts.append(_qte_format(float(val.split()[0]), lib))
+            cells[pan['key']] = ' + '.join(parts)
+
+        total = ' + '.join(_qte_format(float(r['qty_num']), lib)
+                           for lib, r in libelles)
+        tete = ordre[0][1]
+        fusion[id(membres[0])] = {
+            **tete,
+            'prod': tete['prod'] if ordre[0][0] is None else _sans_calibre(tete['prod']),
+            'qty_num': total,
+            'unite': '',
+            'cells': cells,
+        }
+        for r in membres[1:]:
+            fusion[id(r)] = None
+
+    out = []
+    for r in rows:
+        if id(r) in fusion:
+            if fusion[id(r)] is not None:
+                out.append(fusion[id(r)])
+        else:
+            out.append(r)
+    return out

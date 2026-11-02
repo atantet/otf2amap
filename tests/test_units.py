@@ -4,7 +4,7 @@ from datetime import datetime
 from email.message import EmailMessage
 
 from otf2amap import fruits
-from otf2amap.allocate import allocate, match_produit
+from otf2amap.allocate import allocate, fusionner_formats, match_produit
 from otf2amap.extract import cle_tri_produit, parse_raw_cmd
 from otf2amap.fruits import _unite_en_kg, lignes_fruits
 from otf2amap.legumes import renommer_avec_paniers
@@ -210,6 +210,73 @@ def test_allocate_lecture_directe_page2():
     assert cells["moyen"] == "0.9 kg"    # 7.2 / 8
 
 
+def _ligne(prod, qty_num, unite, **cells):
+    return {"prod": prod, "qty_num": qty_num, "unite": unite, "cells": cells}
+
+
+PANIERS_3 = [{"key": "petit", "label": "Petit", "n": 11},
+             {"key": "moyen", "label": "Moyen", "n": 7},
+             {"key": "grand", "label": "Grand", "n": 1}]
+
+
+def test_fusionner_formats_cas_s44():
+    # Cas réel S44 : botte au moyen, petite botte au petit, les deux au grand.
+    rows = [
+        _ligne("Chou blanc", "10.3", "kg", petit="0.4 kg", moyen="0.7 kg", grand="1 kg"),
+        _ligne("Claytone de Cuba en botte", "8", "bte", petit="", moyen="1 bte", grand="1 bte"),
+        _ligne("Claytone de Cuba en petite botte", "12", "bte", petit="1 bte", moyen="", grand="1 bte"),
+    ]
+    out = fusionner_formats(rows, PANIERS_3)
+    assert [r["prod"] for r in out] == ["Chou blanc", "Claytone de Cuba en botte"]
+    clay = out[1]
+    assert clay["qty_num"] == "8 moy. + 12 petites"
+    assert clay["unite"] == ""
+    assert clay["cells"] == {"petit": "1 petite", "moyen": "1 moy.",
+                             "grand": "1 moy. + 1 petite"}
+    assert out[0] is rows[0]                     # produit au poids inchangé
+
+
+def test_fusionner_formats_unite_et_format_avant_la_variete():
+    # « petite » placé avant « à l'unité » et variété après « / ».
+    rows = [
+        _ligne("Chicorée petite à l'unité / Pain de sucre", "12", "u.", petit="1 u", grand="1 u"),
+        _ligne("Chicorée à l'unité / Pain de sucre", "8", "u.", moyen="1 u", grand="1 u"),
+    ]
+    out = fusionner_formats(rows, PANIERS_3)
+    assert len(out) == 1
+    assert out[0]["prod"] == "Chicorée à l'unité / Pain de sucre"
+    assert out[0]["cells"]["grand"] == "1 moy. + 1 petite"
+
+
+def test_fusionner_formats_ne_fusionne_pas_a_tort():
+    rows = [
+        # variétés différentes : pas le même produit
+        _ligne("Salade à l'unité / Batavia", "8", "u.", moyen="1 u"),
+        _ligne("Salade petite à l'unité / Feuille de chêne", "11", "u.", petit="1 u"),
+        # au poids : jamais fusionné
+        _ligne("Concombre", "3", "kg", moyen="0.4 kg"),
+        _ligne("Concombre petit", "2", "kg", petit="0.2 kg"),
+        # unités différentes
+        _ligne("Oignon en botte", "8", "bte", moyen="1 bte"),
+        _ligne("Oignon petit", "11", "u.", petit="1 u"),
+    ]
+    out = fusionner_formats(rows, PANIERS_3)
+    assert out == rows
+
+
+def test_fusionner_formats_sans_format_standard():
+    # Ex. « Demi chou » + « Petit chou » : nom affiché sans le calibre.
+    rows = [
+        _ligne("Petit chou à l'unité", "11", "u.", petit="1 u"),
+        _ligne("Demi chou à l'unité", "7", "u.", moyen="1 u"),
+    ]
+    out = fusionner_formats(rows, PANIERS_3)
+    assert len(out) == 1
+    assert out[0]["prod"] == "Chou à l'unité"
+    assert out[0]["cells"]["petit"] == "1 petit"
+    assert out[0]["cells"]["moyen"] == "1 demi"
+
+
 # ── text ──────────────────────────────────────────────────────────────────────
 
 def test_build_text_table_markdown():
@@ -276,3 +343,15 @@ def test_contrat_depuis_pj_avec_ou_sans_parentheses():
     assert _contrat_depuis_pj([Path("distri-Légumes (octobre 2026 à fin mars 2027)-14-10-2026_12_9_1.xls")]) \
         == "Légumes (octobre 2026 à fin mars 2027)"
     assert _contrat_depuis_pj([Path("autre.pdf")]) is None
+
+
+def test_rendu_pdf_cases_multi_formats():
+    # Une case « 1 moy. + 1 petite » et un total empilé ne doivent pas planter.
+    from pypdf import PdfReader
+
+    from otf2amap.render import build_new_page
+    rows = [_ligne("Cresson en botte", "10 moy. + 9 petites", "",
+                   petit="1 petite", moyen="1 moy.", grand="1 moy. + 1 petite")]
+    texte = PdfReader(build_new_page(rows, PANIERS_3, "04/11/2026")).pages[0].extract_text()
+    for mot in ("moy.", "petites", "petite", "+"):
+        assert mot in texte
