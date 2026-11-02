@@ -18,7 +18,7 @@ Voir `INDEX.md` pour la liste complète des fichiers du projet.
 2. **Extraction du tableau page 1** via `pdfplumber`, gestion de deux layouts PDF possibles (colonnes séparées ou fusionnées)
 3. **Identification des paniers** (`Panier de la semaine - petit/moyen/grand`) et de leur nombre d'unités
 4. **Attribution des quantités par panier** pour chaque produit, à partir des tokens `1 x N.NN unité` de la colonne COMMANDES
-5. **Fusion des formats à la pièce** (`allocate.fusionner_formats`) : les lignes d'un même produit en u./bte qui ne diffèrent que par un qualificatif de calibre (`extract.CALIBRES`) sont regroupées ; chaque case devient « qté format » (`moy.` pour le format sans qualificatif), termes joints par ` + `. Au rendu, les termes sont côte à côte s'ils tiennent dans la case, sinon empilés
+5. **Fusion des formats à la pièce** (`allocate.fusionner_formats`) : les lignes d'un même produit en u./bte qui ne diffèrent que par un qualificatif de calibre (`extract.CALIBRES`) sont regroupées ; chaque case devient « qté format » (`moy.` pour le format sans qualificatif, `entier` face à un `demi`), termes joints par ` + `. Au rendu, les termes sont côte à côte s'ils tiennent dans la case, sinon empilés
 6. **Génération d'un PDF A5 paysage** avec `reportlab`
 
 ---

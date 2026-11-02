@@ -84,8 +84,10 @@ def allocate(rows, paniers, page2_data):
 # Unités « à la pièce » concernées par la fusion des formats.
 UNITES_PIECE = frozenset(('u', 'u.', 'bte'))
 
-# Libellé du format standard (nom sans qualificatif de calibre).
+# Libellé du format standard (nom sans qualificatif de calibre) : « entier »
+# face à un « demi » (Chou / Demi chou), « moy. » sinon.
 FORMAT_STANDARD = 'moy.'
+FORMAT_ENTIER = 'entier'
 
 
 def _nom_et_format(prod):
@@ -143,7 +145,8 @@ def fusionner_formats(rows, paniers):
         # Format standard d'abord, puis les autres dans l'ordre d'arrivée.
         ordre = sorted(zip(formats, membres, strict=True),
                        key=lambda fm: fm[0] is not None)
-        libelles = [(f or FORMAT_STANDARD, r) for f, r in ordre]
+        standard = FORMAT_ENTIER if 'demi' in formats else FORMAT_STANDARD
+        libelles = [(f or standard, r) for f, r in ordre]
 
         cells = {}
         for pan in paniers:

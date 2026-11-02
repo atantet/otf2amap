@@ -277,6 +277,19 @@ def test_fusionner_formats_sans_format_standard():
     assert out[0]["cells"]["moyen"] == "1 demi"
 
 
+def test_fusionner_formats_chou_entier_et_demi():
+    rows = [
+        _ligne("Chou nouveau à l'unité / Pointu", "8", "u.", moyen="1 u", grand="2 u"),
+        _ligne("Demi chou nouveau à l'unité / Pointu", "11", "u.", petit="1 u", grand="1 u"),
+    ]
+    out = fusionner_formats(rows, PANIERS_3)
+    assert len(out) == 1
+    assert out[0]["prod"] == "Chou nouveau à l'unité / Pointu"
+    assert out[0]["qty_num"] == "8 entiers + 11 demis"
+    assert out[0]["cells"] == {"petit": "1 demi", "moyen": "1 entier",
+                               "grand": "2 entiers + 1 demi"}
+
+
 # ── text ──────────────────────────────────────────────────────────────────────
 
 def test_build_text_table_markdown():
